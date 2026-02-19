@@ -1,0 +1,10 @@
+blood-analysis-app/
+├── app.py
+├── requirements.txt
+├── README.md
+├── utils/
+│   ├── __init__.py
+│   ├── ocr_parser.py
+│   ├── analysis_engine.py
+│   ├── ai_review.py
+│   └── pdf_generator.py
