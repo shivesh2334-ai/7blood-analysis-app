@@ -675,7 +675,7 @@ def render_lft_entry_and_analysis():
     with st.expander("👤 Step 1: Patient Demographics", expanded=True):
         dc1, dc2, dc3 = st.columns(3)
         with dc1:
-            lft_age = st.number_input("Age", 18, 120, value=int(st.session_state.patient_info.get('age', 40) or 40), key="lft_age")
+            lft_age = st.number_input("Age", 18, 120, value=max(18, int(st.session_state.patient_info.get('age', 40) or 40)), key="lft_age")
         with dc2:
             lft_sex = st.selectbox("Sex", ["male", "female"],
                                    index=0 if st.session_state.patient_info.get('sex', 'Male') != 'Female' else 1,
