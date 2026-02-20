@@ -9,9 +9,9 @@ from typing import Dict, List, Optional, Tuple
 # Reference ranges for adults
 REFERENCE_RANGES = {
     'RBC': {
-        'Male': {'low': 4.5, 'high': 5.5, 'unit': 'x10¹²/L', 'critical_low': 2.0, 'critical_high': 8.0},
-        'Female': {'low': 4.0, 'high': 5.0, 'unit': 'x10¹²/L', 'critical_low': 2.0, 'critical_high': 8.0},
-        'Default': {'low': 4.0, 'high': 5.5, 'unit': 'x10¹²/L', 'critical_low': 2.0, 'critical_high': 8.0}
+        'Male': {'low': 4.5, 'high': 5.5, 'unit': 'x10^12/L', 'critical_low': 2.0, 'critical_high': 8.0},
+        'Female': {'low': 4.0, 'high': 5.0, 'unit': 'x10^12/L', 'critical_low': 2.0, 'critical_high': 8.0},
+        'Default': {'low': 4.0, 'high': 5.5, 'unit': 'x10^12/L', 'critical_low': 2.0, 'critical_high': 8.0}
     },
     'Hemoglobin': {
         'Male': {'low': 13.5, 'high': 17.5, 'unit': 'g/dL', 'critical_low': 7.0, 'critical_high': 20.0},
@@ -39,7 +39,7 @@ REFERENCE_RANGES = {
         'Default': {'low': 35.0, 'high': 56.0, 'unit': 'fL', 'critical_low': 25.0, 'critical_high': 80.0}
     },
     'WBC': {
-        'Default': {'low': 4.0, 'high': 11.0, 'unit': 'x10⁹/L', 'critical_low': 1.0, 'critical_high': 30.0}
+        'Default': {'low': 4.0, 'high': 11.0, 'unit': 'x10^9/L', 'critical_low': 1.0, 'critical_high': 30.0}
     },
     'Neutrophils': {
         'Default': {'low': 40.0, 'high': 70.0, 'unit': '%', 'critical_low': 5.0, 'critical_high': 95.0}
@@ -57,7 +57,7 @@ REFERENCE_RANGES = {
         'Default': {'low': 0.0, 'high': 1.0, 'unit': '%', 'critical_low': 0.0, 'critical_high': 10.0}
     },
     'Platelets': {
-        'Default': {'low': 150.0, 'high': 400.0, 'unit': 'x10⁹/L', 'critical_low': 20.0, 'critical_high': 1000.0}
+        'Default': {'low': 150.0, 'high': 400.0, 'unit': 'x10^9/L', 'critical_low': 20.0, 'critical_high': 1000.0}
     },
     'MPV': {
         'Default': {'low': 7.5, 'high': 12.5, 'unit': 'fL', 'critical_low': 5.0, 'critical_high': 15.0}
@@ -74,87 +74,50 @@ REFERENCE_RANGES = {
         'Default': {'low': 0.0, 'high': 20.0, 'unit': 'mm/hr', 'critical_low': 0.0, 'critical_high': 100.0}
     },
     'ANC': {
-        'Default': {'low': 1.5, 'high': 8.0, 'unit': 'x10⁹/L', 'critical_low': 0.5, 'critical_high': 20.0}
+        'Default': {'low': 1.5, 'high': 8.0, 'unit': 'x10^9/L', 'critical_low': 0.5, 'critical_high': 20.0}
     },
     'ALC': {
-        'Default': {'low': 1.0, 'high': 4.0, 'unit': 'x10⁹/L', 'critical_low': 0.2, 'critical_high': 15.0}
+        'Default': {'low': 1.0, 'high': 4.0, 'unit': 'x10^9/L', 'critical_low': 0.2, 'critical_high': 15.0}
     },
 }
 
-# Differential diagnosis database
+# =============================================
+# DIFFERENTIAL DIAGNOSIS DATABASE
+# =============================================
 DIFFERENTIAL_DIAGNOSES = {
     'RBC': {
         'low': {
             'title': 'Decreased RBC Count (Anemia)',
             'differentials': [
-                {
-                    'condition': 'Iron Deficiency Anemia',
-                    'discussion': 'Most common cause of anemia worldwide. Results from inadequate iron for hemoglobin synthesis. '
-                                 'Typically presents with microcytic, hypochromic RBCs. Low MCV, low MCH, low MCHC, elevated RDW. '
-                                 'Serum ferritin is the most useful initial test. Iron studies show low serum iron, high TIBC, low transferrin saturation.'
-                },
-                {
-                    'condition': 'Vitamin B12/Folate Deficiency',
-                    'discussion': 'Causes megaloblastic anemia with macrocytic RBCs (high MCV). May see hypersegmented neutrophils on smear. '
-                                 'B12 deficiency can cause neurological symptoms. Check serum B12, folate, methylmalonic acid, homocysteine.'
-                },
-                {
-                    'condition': 'Anemia of Chronic Disease/Inflammation (ACD/AI)',
-                    'discussion': 'Second most common cause of anemia. Associated with chronic infections, autoimmune diseases, malignancy. '
-                                 'Usually normocytic, normochromic but can be microcytic. Ferritin is normal or elevated (acute phase reactant). '
-                                 'Low serum iron, low TIBC, low transferrin saturation.'
-                },
-                {
-                    'condition': 'Hemolytic Anemia',
-                    'discussion': 'Premature destruction of RBCs. Can be hereditary (spherocytosis, G6PD deficiency, sickle cell) or acquired '
-                                 '(autoimmune, microangiopathic). Elevated reticulocyte count, elevated LDH, elevated indirect bilirubin, '
-                                 'low haptoglobin. Peripheral smear may show spherocytes, schistocytes, or sickle cells.'
-                },
-                {
-                    'condition': 'Aplastic Anemia',
-                    'discussion': 'Bone marrow failure with pancytopenia. Low RBCs, WBCs, and platelets. Reticulocyte count is low. '
-                                 'Requires bone marrow biopsy for diagnosis. Can be acquired or inherited (Fanconi anemia).'
-                },
-                {
-                    'condition': 'Thalassemia',
-                    'discussion': 'Inherited disorder of globin chain synthesis. Alpha or beta thalassemia. Microcytic anemia with '
-                                 'relatively high RBC count. Low MCV, normal or slightly elevated RDW. Hemoglobin electrophoresis is diagnostic.'
-                },
-                {
-                    'condition': 'Chronic Kidney Disease',
-                    'discussion': 'Decreased erythropoietin production leads to decreased RBC production. Usually normocytic, normochromic. '
-                                 'Check renal function (BUN, creatinine, GFR). May require erythropoiesis-stimulating agents.'
-                },
-                {
-                    'condition': 'Myelodysplastic Syndrome (MDS)',
-                    'discussion': 'Clonal hematopoietic disorder with ineffective hematopoiesis. May present with macrocytic anemia. '
-                                 'Peripheral smear may show dysplastic features. Bone marrow biopsy is required for diagnosis.'
-                }
+                {'condition': 'Iron Deficiency Anemia',
+                 'discussion': 'Most common cause worldwide. Microcytic, hypochromic RBCs. Low MCV, MCH, MCHC, elevated RDW. Check ferritin and iron studies.'},
+                {'condition': 'Vitamin B12/Folate Deficiency',
+                 'discussion': 'Megaloblastic anemia with high MCV. Hypersegmented neutrophils. Check B12, folate, methylmalonic acid.'},
+                {'condition': 'Anemia of Chronic Disease (ACD/AI)',
+                 'discussion': 'Second most common. Usually normocytic. Ferritin normal/elevated. Low serum iron, low TIBC.'},
+                {'condition': 'Hemolytic Anemia',
+                 'discussion': 'Premature RBC destruction. Elevated reticulocytes, LDH, indirect bilirubin. Low haptoglobin.'},
+                {'condition': 'Aplastic Anemia',
+                 'discussion': 'Bone marrow failure with pancytopenia. Low reticulocyte count. Requires bone marrow biopsy.'},
+                {'condition': 'Thalassemia',
+                 'discussion': 'Inherited globin synthesis disorder. Microcytic with relatively high RBC count. Hemoglobin electrophoresis diagnostic.'},
+                {'condition': 'Chronic Kidney Disease',
+                 'discussion': 'Decreased erythropoietin production. Usually normocytic. Check renal function.'},
+                {'condition': 'Myelodysplastic Syndrome (MDS)',
+                 'discussion': 'Clonal disorder with ineffective hematopoiesis. Often macrocytic. Bone marrow biopsy required.'}
             ]
         },
         'high': {
             'title': 'Elevated RBC Count (Erythrocytosis/Polycythemia)',
             'differentials': [
-                {
-                    'condition': 'Polycythemia Vera',
-                    'discussion': 'Myeloproliferative neoplasm with JAK2 V617F mutation in ~95% of cases. Elevated RBC mass, often with '
-                                 'elevated WBC and platelets. Risk of thrombosis. Requires JAK2 mutation testing, EPO level, bone marrow biopsy.'
-                },
-                {
-                    'condition': 'Secondary Polycythemia',
-                    'discussion': 'Reactive erythrocytosis due to increased EPO production. Causes include chronic hypoxia (COPD, sleep apnea, '
-                                 'high altitude), EPO-secreting tumors (renal cell carcinoma, hepatocellular carcinoma), smoking.'
-                },
-                {
-                    'condition': 'Dehydration (Relative Polycythemia)',
-                    'discussion': 'Decreased plasma volume leads to apparent increase in RBC concentration. All cell counts may appear elevated. '
-                                 'Resolves with adequate hydration.'
-                },
-                {
-                    'condition': 'Thalassemia Trait',
-                    'discussion': 'Heterozygous thalassemia can present with elevated RBC count but low MCV and low-normal hemoglobin. '
-                                 'Mentzer index (MCV/RBC) <13 suggests thalassemia trait.'
-                }
+                {'condition': 'Polycythemia Vera',
+                 'discussion': 'Myeloproliferative neoplasm. JAK2 V617F mutation in ~95%. Risk of thrombosis.'},
+                {'condition': 'Secondary Polycythemia',
+                 'discussion': 'Reactive from chronic hypoxia (COPD, sleep apnea, high altitude), EPO-secreting tumors.'},
+                {'condition': 'Dehydration',
+                 'discussion': 'Decreased plasma volume causes apparent increase. Resolves with hydration.'},
+                {'condition': 'Thalassemia Trait',
+                 'discussion': 'Elevated RBC with low MCV and low-normal Hb. Mentzer index (MCV/RBC) <13.'}
             ]
         }
     },
@@ -162,48 +125,27 @@ DIFFERENTIAL_DIAGNOSES = {
         'low': {
             'title': 'Low Hemoglobin (Anemia)',
             'differentials': [
-                {
-                    'condition': 'Iron Deficiency Anemia',
-                    'discussion': 'Decreased hemoglobin synthesis due to iron deficiency. Most common cause of anemia globally. '
-                                 'Symptoms include fatigue, pallor, dyspnea on exertion, pica, koilonychia. Check ferritin, iron studies.'
-                },
-                {
-                    'condition': 'Hemorrhage (Acute or Chronic)',
-                    'discussion': 'Acute blood loss may not immediately show decreased hemoglobin (dilutional effect takes 24-48 hours). '
-                                 'Chronic blood loss (GI bleeding, menorrhagia) leads to iron deficiency over time.'
-                },
-                {
-                    'condition': 'Hemoglobinopathies',
-                    'discussion': 'Sickle cell disease, thalassemias, and other hemoglobin variants can cause chronic anemia. '
-                                 'Hemoglobin electrophoresis or HPLC is diagnostic.'
-                },
-                {
-                    'condition': 'Bone Marrow Infiltration',
-                    'discussion': 'Leukemia, lymphoma, metastatic cancer, or myelofibrosis can replace normal marrow. '
-                                 'Leukoerythroblastic picture on peripheral smear (nucleated RBCs, tear-drop cells, immature WBCs).'
-                }
+                {'condition': 'Iron Deficiency Anemia',
+                 'discussion': 'Most common cause globally. Fatigue, pallor, dyspnea. Check ferritin, iron studies.'},
+                {'condition': 'Hemorrhage (Acute or Chronic)',
+                 'discussion': 'Acute blood loss dilutional effect takes 24-48 hrs. Chronic loss causes iron deficiency.'},
+                {'condition': 'Hemoglobinopathies',
+                 'discussion': 'Sickle cell, thalassemias. Hemoglobin electrophoresis or HPLC diagnostic.'},
+                {'condition': 'Bone Marrow Infiltration',
+                 'discussion': 'Leukemia, lymphoma, metastatic cancer. Leukoerythroblastic picture on smear.'}
             ]
         },
         'high': {
             'title': 'Elevated Hemoglobin',
             'differentials': [
-                {
-                    'condition': 'Polycythemia Vera',
-                    'discussion': 'Primary myeloproliferative neoplasm. Hemoglobin >16.5 g/dL in men or >16.0 g/dL in women is a major criterion.'
-                },
-                {
-                    'condition': 'Chronic Hypoxia',
-                    'discussion': 'Compensatory erythrocytosis from COPD, congenital heart disease, obstructive sleep apnea, high altitude residence.'
-                },
-                {
-                    'condition': 'Dehydration',
-                    'discussion': 'Hemoconcentration from volume depletion. Will correct with hydration.'
-                },
-                {
-                    'condition': 'Spurious (Lipemia/High WBC)',
-                    'discussion': 'Very high WBC count (>100 x10⁹/L), lipemia, or monoclonal proteins can cause spuriously elevated hemoglobin '
-                                 'due to turbidity in the colorimetric measurement method.'
-                }
+                {'condition': 'Polycythemia Vera',
+                 'discussion': 'Hb >16.5 g/dL (men) or >16.0 g/dL (women) is major criterion.'},
+                {'condition': 'Chronic Hypoxia',
+                 'discussion': 'Compensatory from COPD, heart disease, sleep apnea, high altitude.'},
+                {'condition': 'Dehydration',
+                 'discussion': 'Hemoconcentration from volume depletion. Corrects with hydration.'},
+                {'condition': 'Spurious (Lipemia/High WBC)',
+                 'discussion': 'Very high WBC, lipemia, or monoclonal proteins cause turbidity artifact.'}
             ]
         }
     },
@@ -211,68 +153,35 @@ DIFFERENTIAL_DIAGNOSES = {
         'low': {
             'title': 'Microcytosis (Low MCV)',
             'differentials': [
-                {
-                    'condition': 'Iron Deficiency Anemia',
-                    'discussion': 'Most common cause of microcytic anemia. Low MCV with elevated RDW. '
-                                 'Progressive iron depletion: depleted stores then iron deficient erythropoiesis then iron deficiency anemia.'
-                },
-                {
-                    'condition': 'Thalassemia Trait',
-                    'discussion': 'Alpha or beta thalassemia trait shows low MCV with normal to slightly elevated RDW. '
-                                 'RBC count is often elevated or normal. Mentzer index (MCV/RBC) <13 suggests thalassemia.'
-                },
-                {
-                    'condition': 'Anemia of Chronic Disease',
-                    'discussion': 'Usually normocytic but can be microcytic in about 30 percent of cases. Ferritin is normal or elevated.'
-                },
-                {
-                    'condition': 'Sideroblastic Anemia',
-                    'discussion': 'Can be congenital (X-linked) or acquired (MDS, drugs, lead poisoning). '
-                                 'Ring sideroblasts on iron stain of bone marrow aspirate. Dimorphic RBC population may be seen.'
-                },
-                {
-                    'condition': 'Lead Poisoning',
-                    'discussion': 'Inhibits heme synthesis enzymes. Basophilic stippling on peripheral smear. '
-                                 'Check blood lead level, free erythrocyte protoporphyrin.'
-                }
+                {'condition': 'Iron Deficiency Anemia',
+                 'discussion': 'Most common cause. Low MCV with elevated RDW.'},
+                {'condition': 'Thalassemia Trait',
+                 'discussion': 'Low MCV with normal/slightly elevated RDW. RBC count often normal/elevated. Mentzer index <13.'},
+                {'condition': 'Anemia of Chronic Disease',
+                 'discussion': 'Usually normocytic but can be microcytic in ~30%. Ferritin normal/elevated.'},
+                {'condition': 'Sideroblastic Anemia',
+                 'discussion': 'Congenital or acquired. Ring sideroblasts on bone marrow iron stain.'},
+                {'condition': 'Lead Poisoning',
+                 'discussion': 'Inhibits heme synthesis. Basophilic stippling. Check blood lead level.'}
             ]
         },
         'high': {
             'title': 'Macrocytosis (High MCV)',
             'differentials': [
-                {
-                    'condition': 'Vitamin B12 Deficiency',
-                    'discussion': 'Megaloblastic anemia with MCV often >110 fL. Hypersegmented neutrophils on smear. '
-                                 'Causes: pernicious anemia, malabsorption, strict vegan diet, nitrous oxide exposure.'
-                },
-                {
-                    'condition': 'Folate Deficiency',
-                    'discussion': 'Megaloblastic anemia similar to B12 deficiency but without neurological features. '
-                                 'Causes: poor dietary intake, alcoholism, pregnancy, medications (methotrexate, trimethoprim).'
-                },
-                {
-                    'condition': 'Myelodysplastic Syndrome',
-                    'discussion': 'Clonal stem cell disorder with dysplastic morphology. Macrocytic anemia is common. '
-                                 'May see pseudo-Pelger-Huet cells, hypogranular neutrophils, dysplastic megakaryocytes.'
-                },
-                {
-                    'condition': 'Alcoholism/Liver Disease',
-                    'discussion': 'Common cause of macrocytosis. May be due to direct toxic effect on erythropoiesis, '
-                                 'folate deficiency, or altered lipid metabolism affecting RBC membrane.'
-                },
-                {
-                    'condition': 'Hypothyroidism',
-                    'discussion': 'Mild macrocytosis may occur. Check TSH and free T4.'
-                },
-                {
-                    'condition': 'Reticulocytosis',
-                    'discussion': 'Reticulocytes are larger than mature RBCs. High reticulocyte count (hemolysis, hemorrhage, recovery) '
-                                 'can raise the MCV. Check reticulocyte count.'
-                },
-                {
-                    'condition': 'Medications',
-                    'discussion': 'Hydroxyurea, methotrexate, azathioprine, zidovudine, and other drugs can cause macrocytosis.'
-                }
+                {'condition': 'Vitamin B12 Deficiency',
+                 'discussion': 'Megaloblastic anemia, MCV often >110 fL. Hypersegmented neutrophils.'},
+                {'condition': 'Folate Deficiency',
+                 'discussion': 'Similar to B12 without neurological features. Alcoholism, poor diet, medications.'},
+                {'condition': 'Myelodysplastic Syndrome',
+                 'discussion': 'Clonal disorder with dysplastic morphology. Common cause in elderly.'},
+                {'condition': 'Alcoholism/Liver Disease',
+                 'discussion': 'Direct toxic effect or folate deficiency or altered lipid metabolism.'},
+                {'condition': 'Hypothyroidism',
+                 'discussion': 'Mild macrocytosis. Check TSH and free T4.'},
+                {'condition': 'Reticulocytosis',
+                 'discussion': 'Reticulocytes are larger than mature RBCs. Check reticulocyte count.'},
+                {'condition': 'Medications',
+                 'discussion': 'Hydroxyurea, methotrexate, azathioprine, zidovudine.'}
             ]
         }
     },
@@ -280,41 +189,22 @@ DIFFERENTIAL_DIAGNOSES = {
         'low': {
             'title': 'Low MCHC (Hypochromia)',
             'differentials': [
-                {
-                    'condition': 'Iron Deficiency Anemia',
-                    'discussion': 'Most common cause of low MCHC. Decreased hemoglobin synthesis leads to hypochromic cells.'
-                },
-                {
-                    'condition': 'Thalassemia',
-                    'discussion': 'Decreased globin chain synthesis leads to reduced hemoglobin content.'
-                },
-                {
-                    'condition': 'Sideroblastic Anemia',
-                    'discussion': 'Impaired heme synthesis with iron loading of mitochondria.'
-                }
+                {'condition': 'Iron Deficiency Anemia', 'discussion': 'Most common cause. Decreased hemoglobin synthesis.'},
+                {'condition': 'Thalassemia', 'discussion': 'Decreased globin chain synthesis.'},
+                {'condition': 'Sideroblastic Anemia', 'discussion': 'Impaired heme synthesis.'}
             ]
         },
         'high': {
             'title': 'High MCHC',
             'differentials': [
-                {
-                    'condition': 'Hereditary Spherocytosis',
-                    'discussion': 'RBC membrane defect causing spherical RBCs with reduced surface area. MCHC is truly elevated (>36 g/dL). '
-                                 'Osmotic fragility test, eosin-5-maleimide (EMA) binding test for diagnosis.'
-                },
-                {
-                    'condition': 'Cold Agglutinin Disease',
-                    'discussion': 'Spurious elevation due to RBC agglutination. Multiple RBCs counted as single large cell. '
-                                 'Warming the sample to 37C resolves the artifact.'
-                },
-                {
-                    'condition': 'Severe Lipemia',
-                    'discussion': 'Turbidity from lipemia falsely elevates hemoglobin measurement, leading to spuriously high MCHC.'
-                },
-                {
-                    'condition': 'Hemoglobin C Disease',
-                    'discussion': 'Hemoglobin C crystals cause RBC dehydration. Target cells and crystal-containing cells on smear.'
-                }
+                {'condition': 'Hereditary Spherocytosis',
+                 'discussion': 'RBC membrane defect. MCHC truly elevated >36 g/dL. EMA binding test diagnostic.'},
+                {'condition': 'Cold Agglutinin Disease',
+                 'discussion': 'Spurious from RBC agglutination. Warming sample to 37C resolves.'},
+                {'condition': 'Severe Lipemia',
+                 'discussion': 'Turbidity falsely elevates hemoglobin measurement.'},
+                {'condition': 'Hemoglobin C Disease',
+                 'discussion': 'RBC dehydration from Hb C crystals. Target cells on smear.'}
             ]
         }
     },
@@ -322,30 +212,12 @@ DIFFERENTIAL_DIAGNOSES = {
         'high': {
             'title': 'Elevated RDW (Anisocytosis)',
             'differentials': [
-                {
-                    'condition': 'Iron Deficiency Anemia',
-                    'discussion': 'Elevated RDW is an early finding in iron deficiency. Mixed population of normocytic and microcytic cells.'
-                },
-                {
-                    'condition': 'B12/Folate Deficiency',
-                    'discussion': 'Mixed population of macrocytes and normocytes causes elevated RDW.'
-                },
-                {
-                    'condition': 'Myelodysplastic Syndrome',
-                    'discussion': 'Dysplastic erythropoiesis produces RBCs of variable size.'
-                },
-                {
-                    'condition': 'Post-Transfusion',
-                    'discussion': 'Transfused RBCs may differ in size from patient own cells, widening the distribution.'
-                },
-                {
-                    'condition': 'Mixed Nutritional Deficiency',
-                    'discussion': 'Combined iron and B12/folate deficiency produces both micro and macrocytes.'
-                },
-                {
-                    'condition': 'Hemoglobinopathies',
-                    'discussion': 'Sickle cell disease and other hemoglobinopathies can produce elevated RDW.'
-                }
+                {'condition': 'Iron Deficiency Anemia', 'discussion': 'Early finding. Mixed normocytic and microcytic cells.'},
+                {'condition': 'B12/Folate Deficiency', 'discussion': 'Mixed population of macrocytes and normocytes.'},
+                {'condition': 'Myelodysplastic Syndrome', 'discussion': 'Dysplastic erythropoiesis with variable cell sizes.'},
+                {'condition': 'Post-Transfusion', 'discussion': 'Transfused RBCs differ in size from patient cells.'},
+                {'condition': 'Mixed Nutritional Deficiency', 'discussion': 'Combined iron and B12/folate deficiency.'},
+                {'condition': 'Hemoglobinopathies', 'discussion': 'Variable RBC shapes and sizes.'}
             ]
         }
     },
@@ -353,29 +225,132 @@ DIFFERENTIAL_DIAGNOSES = {
         'low': {
             'title': 'Leukopenia (Low WBC)',
             'differentials': [
-                {
-                    'condition': 'Neutropenia',
-                    'discussion': 'Most common cause of leukopenia. Can be due to infections (viral), drugs, autoimmune conditions, bone marrow failure.'
-                },
-                {
-                    'condition': 'Viral Infections',
-                    'discussion': 'Many viral infections (HIV, hepatitis, EBV, CMV, influenza) cause transient leukopenia.'
-                },
-                {
-                    'condition': 'Aplastic Anemia',
-                    'discussion': 'Pancytopenia with hypocellular bone marrow.'
-                },
-                {
-                    'condition': 'Drug-Induced',
-                    'discussion': 'Chemotherapy, clozapine, carbamazepine, methimazole, sulfonamides, and many others.'
-                },
-                {
-                    'condition': 'Autoimmune',
-                    'discussion': 'SLE, rheumatoid arthritis can cause neutropenia or lymphopenia.'
-                },
-                {
-                    'condition': 'Hypersplenism',
-                    'discussion': 'Splenomegaly from any cause can sequester WBCs.'
-                }
+                {'condition': 'Neutropenia', 'discussion': 'Most common cause. Viral infections, drugs, autoimmune, marrow failure.'},
+                {'condition': 'Viral Infections', 'discussion': 'HIV, hepatitis, EBV, CMV, influenza cause transient leukopenia.'},
+                {'condition': 'Aplastic Anemia', 'discussion': 'Pancytopenia with hypocellular bone marrow.'},
+                {'condition': 'Drug-Induced', 'discussion': 'Chemotherapy, clozapine, carbamazepine, methimazole, sulfonamides.'},
+                {'condition': 'Autoimmune', 'discussion': 'SLE, rheumatoid arthritis can cause neutropenia or lymphopenia.'},
+                {'condition': 'Hypersplenism', 'discussion': 'Splenomegaly sequesters WBCs.'}
             ]
- 
+        },
+        'high': {
+            'title': 'Leukocytosis (High WBC)',
+            'differentials': [
+                {'condition': 'Bacterial Infection', 'discussion': 'Most common cause. Left shift, toxic granulation, Dohle bodies.'},
+                {'condition': 'Stress/Physiologic', 'discussion': 'Catecholamine demargination of neutrophils.'},
+                {'condition': 'Corticosteroid Use', 'discussion': 'Demargination and decreased migration to tissues.'},
+                {'condition': 'Chronic Myeloid Leukemia (CML)', 'discussion': 'Full myeloid maturation spectrum. Basophilia. BCR-ABL1.'},
+                {'condition': 'Acute Leukemia', 'discussion': 'Can present with very high WBC with circulating blasts.'},
+                {'condition': 'Smoking', 'discussion': 'Chronic mild neutrophilic leukocytosis.'}
+            ]
+        }
+    },
+    'Platelets': {
+        'low': {
+            'title': 'Thrombocytopenia (Low Platelets)',
+            'differentials': [
+                {'condition': 'Immune Thrombocytopenia (ITP)', 'discussion': 'Autoimmune destruction. Diagnosis of exclusion. Large platelets on smear.'},
+                {'condition': 'Pseudothrombocytopenia', 'discussion': 'EDTA-induced clumping. Check smear. Repeat with citrate tube.'},
+                {'condition': 'DIC', 'discussion': 'Consumptive coagulopathy. Elevated PT/PTT, low fibrinogen, schistocytes.'},
+                {'condition': 'TTP/HUS', 'discussion': 'Microangiopathic hemolytic anemia. Schistocytes. ADAMTS13 for TTP.'},
+                {'condition': 'Bone Marrow Failure', 'discussion': 'Aplastic anemia, MDS, leukemia. Usually with other cytopenias.'},
+                {'condition': 'Drug-Induced', 'discussion': 'HIT, valproic acid, quinine, chemotherapy.'},
+                {'condition': 'Liver Disease/Hypersplenism', 'discussion': 'Portal hypertension with platelet sequestration.'}
+            ]
+        },
+        'high': {
+            'title': 'Thrombocytosis (High Platelets)',
+            'differentials': [
+                {'condition': 'Reactive Thrombocytosis', 'discussion': 'Most common (>80%). Infection, inflammation, iron deficiency, surgery.'},
+                {'condition': 'Essential Thrombocythemia', 'discussion': 'Myeloproliferative neoplasm. JAK2, CALR, or MPL mutations.'},
+                {'condition': 'Iron Deficiency', 'discussion': 'Reactive thrombocytosis. Normalizes with iron replacement.'},
+                {'condition': 'Post-Splenectomy', 'discussion': 'Loss of splenic sequestration.'}
+            ]
+        }
+    },
+    'MPV': {
+        'low': {
+            'title': 'Low MPV (Small Platelets)',
+            'differentials': [
+                {'condition': 'Bone Marrow Suppression', 'discussion': 'Decreased megakaryopoiesis produces small platelets.'},
+                {'condition': 'Wiskott-Aldrich Syndrome', 'discussion': 'X-linked. Characteristically small platelets with thrombocytopenia.'},
+                {'condition': 'Hypersplenism', 'discussion': 'Spleen sequesters larger platelets.'}
+            ]
+        },
+        'high': {
+            'title': 'High MPV (Large Platelets)',
+            'differentials': [
+                {'condition': 'Immune Thrombocytopenia (ITP)', 'discussion': 'Compensatory large, young platelets.'},
+                {'condition': 'Inherited Platelet Disorders', 'discussion': 'Bernard-Soulier, Gray platelet syndrome, MYH9-related disease.'},
+                {'condition': 'EDTA Artifact', 'discussion': 'Prolonged EDTA exposure causes platelet swelling.'}
+            ]
+        }
+    },
+    'Neutrophils': {
+        'low': {
+            'title': 'Neutropenia',
+            'differentials': [
+                {'condition': 'Drug-Induced', 'discussion': 'Chemotherapy, clozapine, carbamazepine, methimazole.'},
+                {'condition': 'Viral Infections', 'discussion': 'HIV, hepatitis, EBV, CMV, parvovirus B19.'},
+                {'condition': 'Autoimmune Neutropenia', 'discussion': 'Primary or secondary (SLE, Felty syndrome).'},
+                {'condition': 'Benign Ethnic Neutropenia', 'discussion': 'Common in African descent. ANC 1.0-1.5 without increased risk.'}
+            ]
+        },
+        'high': {
+            'title': 'Neutrophilia',
+            'differentials': [
+                {'condition': 'Bacterial Infection', 'discussion': 'Most common. Left shift, toxic granulation.'},
+                {'condition': 'Corticosteroid Effect', 'discussion': 'Demargination from vessel walls.'},
+                {'condition': 'Myeloproliferative Neoplasms', 'discussion': 'CML with persistent neutrophilia and basophilia.'}
+            ]
+        }
+    },
+    'Lymphocytes': {
+        'low': {
+            'title': 'Lymphopenia',
+            'differentials': [
+                {'condition': 'HIV/AIDS', 'discussion': 'CD4+ T cell depletion.'},
+                {'condition': 'Corticosteroid Use', 'discussion': 'Lymphocyte redistribution and apoptosis.'},
+                {'condition': 'Severe Infection/Sepsis', 'discussion': 'Lymphocyte apoptosis. Poor prognostic sign.'}
+            ]
+        },
+        'high': {
+            'title': 'Lymphocytosis',
+            'differentials': [
+                {'condition': 'Viral Infections', 'discussion': 'EBV, CMV, hepatitis. Reactive lymphocytes on smear.'},
+                {'condition': 'Chronic Lymphocytic Leukemia (CLL)', 'discussion': 'Mature lymphocytes >5 x10^9/L. Smudge cells.'},
+                {'condition': 'Pertussis', 'discussion': 'Marked lymphocytosis especially in children.'}
+            ]
+        }
+    },
+    'Eosinophils': {
+        'high': {
+            'title': 'Eosinophilia',
+            'differentials': [
+                {'condition': 'Allergic Conditions', 'discussion': 'Asthma, allergic rhinitis, eczema. Most common cause.'},
+                {'condition': 'Parasitic Infections', 'discussion': 'Tissue-invasive helminths.'},
+                {'condition': 'Hypereosinophilic Syndrome', 'discussion': 'Persistent >1.5 x10^9/L with organ damage.'}
+            ]
+        }
+    },
+    'Basophils': {
+        'high': {
+            'title': 'Basophilia',
+            'differentials': [
+                {'condition': 'Chronic Myeloid Leukemia', 'discussion': 'Characteristic finding in CML.'},
+                {'condition': 'Other Myeloproliferative Neoplasms', 'discussion': 'PV, myelofibrosis.'},
+                {'condition': 'Allergic/Hypersensitivity', 'discussion': 'Immediate hypersensitivity reactions.'}
+            ]
+        }
+    },
+    'Monocytes': {
+        'high': {
+            'title': 'Monocytosis',
+            'differentials': [
+                {'condition': 'Chronic Infections', 'discussion': 'TB, endocarditis, brucellosis, fungal infections.'},
+                {'condition': 'CMML', 'discussion': 'Persistent monocytosis >1 x10^9/L for >3 months.'},
+                {'condition': 'Recovery from Neutropenia', 'discussion': 'Monocytes recover before neutrophils.'}
+            ]
+        }
+    },
+    'Reti
