@@ -5,7 +5,10 @@ Handles extraction of blood parameters from uploaded documents.
 
 import re
 import io
-from typing import Dict, Tuple
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Tuple
 from PIL import Image
 
 try:
@@ -17,6 +20,181 @@ try:
     import pdfplumber
 except ImportError:
     pdfplumber = None
+
+logger = logging.getLogger(__name__)
+
+try:
+    from utils.analysis_engine import REFERENCE_RANGES as _REFERENCE_RANGES
+except ImportError:
+    _REFERENCE_RANGES = {}
+
+
+@dataclass
+class ParsedValue:
+    """Encapsulates a single parsed blood-test parameter."""
+    value: float
+    unit: str                  # Standard (normalized) unit
+    original_unit: str         # Unit as found in source text
+    confidence_score: float    # 0.0 – 1.0
+    raw_match: str             # Original matched text snippet
+    validation_status: str     # 'valid' | 'questionable' | 'invalid' | 'unknown'
+    validation_message: str
+
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for UI display and downstream processing."""
+        return {
+            'value': self.value,
+            'unit': self.unit,
+            'original_unit': self.original_unit,
+            'confidence_score': self.confidence_score,
+            'raw_match': self.raw_match,
+            'validation_status': self.validation_status,
+            'validation_message': self.validation_message,
+        }
+
+
+@dataclass
+class ParsingStep:
+    """Records one step of the parsing pipeline for debugging."""
+    step_name: str
+    status: str                # 'success' | 'partial' | 'failed'
+    extracted_items: int
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> Dict:
+        return {
+            'step_name': self.step_name,
+            'status': self.status,
+            'extracted_items': self.extracted_items,
+            'errors': self.errors,
+            'warnings': self.warnings,
+            'timestamp': self.timestamp,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Unit conversion factors: (original_unit_key → standard_unit, factor)
+# Apply: standard_value = original_value * factor
+# ---------------------------------------------------------------------------
+_UNIT_CONVERSION_TABLE: Dict[str, Dict[str, object]] = {
+    # Hemoglobin: g/L → g/dL
+    'g/l':        {'standard': 'g/dL', 'factor': 0.1},
+    # Bilirubin: µmol/L → mg/dL
+    'umol/l':     {'standard': 'mg/dL', 'factor': 0.05848},
+    'µmol/l':     {'standard': 'mg/dL', 'factor': 0.05848},
+    # Creatinine: µmol/L → mg/dL
+    'µmol/l_creatinine': {'standard': 'mg/dL', 'factor': 0.01131},
+    # BUN / Urea: mmol/L → mg/dL
+    'mmol/l_urea':{'standard': 'mg/dL', 'factor': 2.8011},
+    # Cholesterol / TG: mmol/L → mg/dL
+    'mmol/l_cholesterol': {'standard': 'mg/dL', 'factor': 38.67},
+    'mmol/l_tg':  {'standard': 'mg/dL', 'factor': 88.57},
+    # Glucose: mmol/L → mg/dL
+    'mmol/l_glucose': {'standard': 'mg/dL', 'factor': 18.016},
+    # Electrolytes: mmol/L ↔ mEq/L (1:1 for monovalent ions)
+    'mmol/l':     {'standard': 'mEq/L', 'factor': 1.0},
+    # TSH: mIU/L ↔ µIU/mL (1:1)
+    'miu/l':      {'standard': 'µIU/mL', 'factor': 1.0},
+    'mu/l':       {'standard': 'µIU/mL', 'factor': 1.0},
+    # Albumin / Protein: g/L → g/dL
+    'g/l_albumin':{'standard': 'g/dL', 'factor': 0.1},
+}
+
+
+def normalize_unit(value: float, original_unit: str, target_unit: str) -> float:
+    """Convert *value* from *original_unit* to *target_unit* where a known
+    conversion exists.  Returns the original value unchanged when no
+    conversion is available.
+
+    This function is intended for callers that receive values in non-standard
+    units (e.g. from lab reports using mmol/L instead of mg/dL) and need to
+    normalise them before storing or comparing with reference ranges.  It can
+    also be called by UI code when displaying parameters in user-selected units.
+
+    Example::
+
+        # Convert Hemoglobin reported as g/L to standard g/dL
+        hb_gdl = normalize_unit(142.0, 'g/L', 'g/dL')  # → 14.2
+    """
+    key = original_unit.strip().lower()
+    if key in _UNIT_CONVERSION_TABLE:
+        entry = _UNIT_CONVERSION_TABLE[key]
+        if entry['standard'].lower() == target_unit.strip().lower():
+            return value * entry['factor']
+    return value
+
+
+def validate_parameter_value(param_name: str, value: float, unit: str) -> Dict:
+    """Validate *value* against known physiological reference ranges.
+
+    Returns a dict with keys ``status`` ('valid' | 'questionable' | 'invalid'
+    | 'unknown') and ``message``.
+    """
+    if not _REFERENCE_RANGES:
+        return {'status': 'unknown', 'message': 'Reference ranges unavailable'}
+
+    if value < 0:
+        return {'status': 'invalid', 'message': 'Negative value is not physiologically possible'}
+
+    ref = _REFERENCE_RANGES.get(param_name)
+    if ref is None:
+        return {'status': 'unknown', 'message': 'No reference range defined for this parameter'}
+
+    ranges = ref.get('Default', list(ref.values())[0])
+    low = ranges.get('low')
+    high = ranges.get('high')
+    critical_low = ranges.get('critical_low')
+    critical_high = ranges.get('critical_high')
+
+    if critical_low is not None and value < critical_low:
+        return {'status': 'invalid',
+                'message': f'Value {value} is critically low (< {critical_low} {unit})'}
+    if critical_high is not None and value > critical_high:
+        return {'status': 'invalid',
+                'message': f'Value {value} is critically high (> {critical_high} {unit})'}
+    if low is not None and high is not None:
+        if value < low or value > high:
+            return {'status': 'questionable',
+                    'message': f'Value {value} is outside normal range [{low}–{high} {unit}]'}
+        return {'status': 'valid',
+                'message': f'Value {value} is within normal range [{low}–{high} {unit}]'}
+
+    return {'status': 'unknown', 'message': 'Incomplete reference range data'}
+
+
+def get_parsing_confidence(param_name: str, match_quality: float) -> float:
+    """Return a 0–1 confidence score for a parsed value.
+
+    *match_quality* is an initial score from the caller (e.g. 1.0 when the
+    first pattern matched, 0.7 for a fallback pattern).  The function may
+    adjust it based on whether the parameter is well-known.
+    """
+    has_ref = param_name in _REFERENCE_RANGES
+    # Slight boost for parameters with known reference ranges (more structured)
+    adjusted = match_quality * (1.0 if has_ref else 0.9)
+    return round(min(max(adjusted, 0.0), 1.0), 3)
+
+
+def add_parsing_step(
+    parsing_steps: List[ParsingStep],
+    step_name: str,
+    status: str,
+    extracted_items: int = 0,
+    errors: Optional[List[str]] = None,
+    warnings: Optional[List[str]] = None,
+) -> None:
+    """Append a :class:`ParsingStep` to *parsing_steps* in place."""
+    parsing_steps.append(
+        ParsingStep(
+            step_name=step_name,
+            status=status,
+            extracted_items=extracted_items,
+            errors=errors or [],
+            warnings=warnings or [],
+        )
+    )
 
 
 PARAMETER_PATTERNS = {
@@ -682,22 +860,54 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     return all_text
 
 
-def parse_parameters(text: str) -> Dict:
-    """Parse blood parameters from extracted text."""
+def parse_parameters(text: str, debug: bool = False) -> Dict:
+    """Parse blood parameters from extracted text.
+
+    Each value in the returned dict is a plain dictionary produced by
+    :meth:`ParsedValue.to_dict`, so existing callers continue to work
+    unchanged while gaining access to the new enrichment fields.
+
+    When *debug* is ``True``, additional logging is emitted for every
+    matched (and unmatched) parameter.
+    """
     results = {}
     for param_name, config in PARAMETER_PATTERNS.items():
-        for pattern in config['patterns']:
+        for pattern_index, pattern in enumerate(config['patterns']):
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 try:
-                    value = float(match.group(1))
-                    results[param_name] = {
-                        'value': value,
-                        'unit': config['unit'],
-                        'raw_match': match.group(0)
-                    }
+                    raw_value_str = match.group(1)
+                    value = float(raw_value_str)
+                    standard_unit = config['unit']
+                    original_unit = standard_unit  # pattern doesn't capture unit separately
+
+                    # Confidence: first pattern = 1.0, subsequent = 0.85, 0.70, …
+                    base_quality = max(1.0 - pattern_index * 0.15, 0.5)
+                    confidence = get_parsing_confidence(param_name, base_quality)
+
+                    validation = validate_parameter_value(param_name, value, standard_unit)
+
+                    parsed = ParsedValue(
+                        value=value,
+                        unit=standard_unit,
+                        original_unit=original_unit,
+                        confidence_score=confidence,
+                        raw_match=match.group(0),
+                        validation_status=validation['status'],
+                        validation_message=validation['message'],
+                    )
+                    results[param_name] = parsed.to_dict()
+
+                    if debug:
+                        logger.debug(
+                            "Parsed %s = %s %s (confidence=%.2f, status=%s)",
+                            param_name, value, standard_unit,
+                            confidence, validation['status'],
+                        )
                     break
-                except (ValueError, IndexError):
+                except (ValueError, IndexError) as exc:
+                    if debug:
+                        logger.debug("Pattern error for %s: %s", param_name, exc)
                     continue
     return results
 
@@ -725,20 +935,123 @@ def extract_patient_info(text: str) -> Dict:
     return info
 
 
-def process_uploaded_file(uploaded_file) -> Tuple[str, Dict, Dict]:
-    """Process an uploaded file and return extracted text, parameters, and patient info."""
+def process_uploaded_file(
+    uploaded_file,
+) -> Tuple[str, Dict, Dict, List[Dict], Dict]:
+    """Process an uploaded file and return extracted text, parameters,
+    patient info, parsing steps, and quality metrics.
+
+    Return value
+    ------------
+    ``(extracted_text, parameters, patient_info, parsing_steps, quality_metrics)``
+
+    * *extracted_text*  – raw text from the file
+    * *parameters*      – ``{param_name: ParsedValue.to_dict(), …}``
+    * *patient_info*    – ``{name, age, sex, date}``
+    * *parsing_steps*   – list of :meth:`ParsingStep.to_dict` dicts
+    * *quality_metrics* – summary statistics about parse quality
+    """
+    parsing_steps: List[ParsingStep] = []
     file_type = uploaded_file.type
     file_bytes = uploaded_file.read()
     extracted_text = ""
 
+    # ── Step 1: text extraction ──────────────────────────────────
+    extraction_errors: List[str] = []
     if 'pdf' in file_type:
-        extracted_text = extract_text_from_pdf(file_bytes)
+        try:
+            extracted_text = extract_text_from_pdf(file_bytes)
+            add_parsing_step(parsing_steps, 'text_extraction', 'success',
+                             extracted_items=len(extracted_text.split()))
+        except Exception as exc:
+            extraction_errors.append(str(exc))
+            add_parsing_step(parsing_steps, 'text_extraction', 'failed',
+                             errors=extraction_errors)
     elif 'image' in file_type or file_type in ['image/jpeg', 'image/jpg', 'image/png']:
-        image = Image.open(io.BytesIO(file_bytes))
-        extracted_text = extract_text_from_image(image)
+        try:
+            image = Image.open(io.BytesIO(file_bytes))
+            extracted_text = extract_text_from_image(image)
+            add_parsing_step(parsing_steps, 'text_extraction', 'success',
+                             extracted_items=len(extracted_text.split()))
+        except Exception as exc:
+            extraction_errors.append(str(exc))
+            add_parsing_step(parsing_steps, 'text_extraction', 'failed',
+                             errors=extraction_errors)
     else:
         extracted_text = "Unsupported file format"
+        add_parsing_step(parsing_steps, 'text_extraction', 'failed',
+                         errors=['Unsupported file format'])
 
-    parameters = parse_parameters(extracted_text)
-    patient_info = extract_patient_info(extracted_text)
-    return extracted_text, parameters, patient_info
+    # ── Step 2: parameter parsing ────────────────────────────────
+    invalid_params: List[str] = []
+    try:
+        parameters = parse_parameters(extracted_text)
+        parse_warnings: List[str] = []
+        invalid_params = [
+            p for p, d in parameters.items() if d.get('validation_status') == 'invalid'
+        ]
+        if invalid_params:
+            parse_warnings.append(
+                f"Invalid values detected: {', '.join(invalid_params)}"
+            )
+        status = 'partial' if parse_warnings else ('success' if parameters else 'failed')
+        add_parsing_step(parsing_steps, 'parameter_parsing', status,
+                         extracted_items=len(parameters),
+                         warnings=parse_warnings)
+    except Exception as exc:
+        parameters = {}
+        add_parsing_step(parsing_steps, 'parameter_parsing', 'failed',
+                         errors=[str(exc)])
+
+    # ── Step 3: validation summary ───────────────────────────────
+    validation_warnings: List[str] = []
+    questionable = [
+        p for p, d in parameters.items() if d.get('validation_status') == 'questionable'
+    ]
+    if questionable:
+        validation_warnings.append(
+            f"Questionable values (outside normal range): {', '.join(questionable)}"
+        )
+    val_status = 'partial' if validation_warnings else 'success'
+    add_parsing_step(parsing_steps, 'validation', val_status,
+                     extracted_items=len(parameters),
+                     warnings=validation_warnings)
+
+    # ── Step 4: patient info extraction ─────────────────────────
+    try:
+        patient_info = extract_patient_info(extracted_text)
+        add_parsing_step(parsing_steps, 'patient_info_extraction', 'success',
+                         extracted_items=len(patient_info))
+    except Exception as exc:
+        patient_info = {}
+        add_parsing_step(parsing_steps, 'patient_info_extraction', 'failed',
+                         errors=[str(exc)])
+
+    # ── Quality metrics ──────────────────────────────────────────
+    confidence_scores = [
+        d['confidence_score'] for d in parameters.values()
+        if isinstance(d.get('confidence_score'), (int, float))
+    ]
+    avg_confidence = (
+        round(sum(confidence_scores) / len(confidence_scores), 3)
+        if confidence_scores else 0.0
+    )
+    valid_count = sum(
+        1 for d in parameters.values() if d.get('validation_status') == 'valid'
+    )
+    quality_metrics = {
+        'total_parameters': len(parameters),
+        'valid_parameters': valid_count,
+        'questionable_parameters': len(questionable),
+        'invalid_parameters': len(invalid_params),
+        'average_confidence': avg_confidence,
+        'text_length': len(extracted_text),
+    }
+
+    return (
+        extracted_text,
+        parameters,
+        patient_info,
+        [step.to_dict() for step in parsing_steps],
+        quality_metrics,
+    )
