@@ -746,7 +746,7 @@ with main_tabs[0]:
                             uf.seek(0)
                     with c2:
                         with st.spinner("Extracting data..."):
-                            text, params, info = process_uploaded_file(uf)
+                            text, params, info, parsing_steps, quality_metrics = process_uploaded_file(uf)
                         
                         st.text_area("Extracted Text", text, height=200, key=f"txt_{uf.name}")
                         
