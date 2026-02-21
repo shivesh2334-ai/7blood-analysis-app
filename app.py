@@ -1,7 +1,8 @@
 """
-🩸 Hematology & Clinical Laboratory Analysis Tool
-Comprehensive blood investigation analysis with AI-powered review.
-Supports CBC, LFT, and multi-panel analysis.
+🩸 Comprehensive Laboratory Investigation Analysis Tool
+Multi-panel blood & urine investigation analysis with AI-powered review.
+Supports: CBC, LFT, KFT, Lipid Profile, Blood Sugar, Urine R/M, TFT, 
+          Rheumatology Markers, Oncology Markers
 """
 
 import streamlit as st
@@ -14,908 +15,874 @@ import io
 import os
 from typing import Dict, List, Optional
 
-# Import utility modules
 from utils.ocr_parser import process_uploaded_file, PARAMETER_PATTERNS
 from utils.analysis_engine import (
     analyze_all_parameters, classify_value, get_reference_range,
     check_sample_quality, generate_summary_text, REFERENCE_RANGES,
     get_differential_diagnosis, calculate_additional_indices
 )
-from utils.lft_engine import (
-    LFT_REFERENCE_RANGES, analyze_lft, calculate_r_value,
-    determine_lft_pattern, determine_severity, generate_lft_recommendations,
-    generate_lft_educational_content, get_lft_differential_diagnosis
-)
-from utils.ai_review import get_ai_review, get_parameter_specific_ai_review
-from utils.pdf_generator import generate_pdf_report
+from utils.lft_engine import analyze_lft, LFT_REFERENCE_RANGES
+from utils.kft_engine import analyze_kft, KFT_REFERENCE_RANGES
+from utils.lipid_engine import analyze_lipid, LIPID_REFERENCE_RANGES
+from utils.sugar_engine import analyze_sugar, SUGAR_REFERENCE_RANGES
+from utils.urine_engine import analyze_urine, URINE_REFERENCE_RANGES
+from utils.tft_engine import analyze_tft, TFT_REFERENCE_RANGES
+from utils.rheumatology_engine import analyze_rheumatology, RHEUM_REFERENCE_RANGES
+from utils.oncology_engine import analyze_oncology, ONCO_REFERENCE_RANGES
+from utils.ai_review import get_ai_review, get_panel_ai_review
+from utils.pdf_generator import generate_pdf_report, generate_multi_panel_pdf
+from utils.learning_engine import get_learning_content, get_parameter_education
+from utils.panel_registry import PANEL_REGISTRY, get_all_panels, get_panel_parameters
 
-# ── Page Configuration ──────────────────────────────────────────────
+# ── Page Configuration ──────────────────────────────────────────
 st.set_page_config(
-    page_title="🩸 Blood Investigation Analysis Tool",
+    page_title="🩸 Lab Investigation Analysis Tool",
     page_icon="🩸",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ── Custom CSS ──────────────────────────────────────────────────────
+# ── Custom CSS ──────────────────────────────────────────────────
 st.markdown("""
 <style>
     .main-header {
         background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-        color: white;
-        padding: 20px 30px;
-        border-radius: 15px;
-        margin-bottom: 20px;
-        text-align: center;
+        color: white; padding: 20px 30px; border-radius: 15px;
+        margin-bottom: 20px; text-align: center;
     }
     .main-header h1 { font-size: 2.2em; margin-bottom: 5px; }
-    .main-header p { opacity: 0.9; font-size: 1.1em; }
+    .main-header p { opacity: 0.9; font-size: 1.05em; }
     .metric-card {
-        background: white;
-        border-radius: 12px;
-        padding: 20px;
+        background: white; border-radius: 12px; padding: 15px;
         box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-        border-left: 4px solid #667eea;
-        margin-bottom: 10px;
+        border-left: 4px solid #667eea; margin-bottom: 10px;
     }
     .critical-alert {
-        background: #fee;
-        border: 2px solid #e74c3c;
-        border-radius: 10px;
-        padding: 15px;
-        margin: 10px 0;
+        background: #fee; border: 2px solid #e74c3c;
+        border-radius: 10px; padding: 15px; margin: 10px 0;
     }
     .normal-badge {
-        background: #d4edda; color: #155724;
-        padding: 4px 12px; border-radius: 20px;
-        font-weight: bold; font-size: 0.85em;
+        background: #d4edda; color: #155724; padding: 3px 10px;
+        border-radius: 20px; font-weight: bold; font-size: 0.85em;
     }
     .abnormal-badge {
-        background: #fff3cd; color: #856404;
-        padding: 4px 12px; border-radius: 20px;
-        font-weight: bold; font-size: 0.85em;
+        background: #fff3cd; color: #856404; padding: 3px 10px;
+        border-radius: 20px; font-weight: bold; font-size: 0.85em;
     }
     .critical-badge {
-        background: #f8d7da; color: #721c24;
-        padding: 4px 12px; border-radius: 20px;
-        font-weight: bold; font-size: 0.85em;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 8px 8px 0 0;
-        padding: 10px 20px;
+        background: #f8d7da; color: #721c24; padding: 3px 10px;
+        border-radius: 20px; font-weight: bold; font-size: 0.85em;
     }
     .diagnosis-card {
-        background: #f8f9fa;
-        border-left: 4px solid #4ecdc4;
-        padding: 15px;
-        margin: 8px 0;
-        border-radius: 0 8px 8px 0;
+        background: #f8f9fa; border-left: 4px solid #4ecdc4;
+        padding: 12px 15px; margin: 8px 0; border-radius: 0 8px 8px 0;
+    }
+    .learning-card {
+        background: #f0f4ff; border-left: 4px solid #667eea;
+        padding: 15px; margin: 10px 0; border-radius: 0 10px 10px 0;
+    }
+    .step-box {
+        background: white; padding: 18px; margin: 10px 0;
+        border-radius: 10px; border-left: 4px solid #4ecdc4;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    .panel-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white; padding: 10px 20px; border-radius: 10px;
+        margin: 15px 0 10px 0; font-weight: bold;
     }
     .quality-pass { border-left-color: #27ae60; }
     .quality-warning { border-left-color: #f39c12; }
     .quality-error { border-left-color: #e74c3c; }
     .quality-info { border-left-color: #3498db; }
-    .lft-pattern-hepatocellular { background: #ffe0e0; border-color: #e74c3c; }
-    .lft-pattern-cholestatic { background: #e0f7fa; border-color: #00bcd4; }
-    .lft-pattern-mixed { background: #fff8e1; border-color: #ffc107; }
-    .lft-pattern-isolated { background: #f3e5f5; border-color: #9c27b0; }
-    .step-box {
-        background: white;
-        padding: 18px;
-        margin: 10px 0;
-        border-radius: 10px;
-        border-left: 4px solid #4ecdc4;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session State Initialization ────────────────────────────────────
-if 'parameters' not in st.session_state:
-    st.session_state.parameters = {}
+# ── Session State Init ──────────────────────────────────────────
+PANELS = ['CBC', 'LFT', 'KFT', 'Lipid', 'Sugar', 'Urine', 'TFT', 'Rheumatology', 'Oncology']
+
+for panel in PANELS:
+    if f'{panel}_params' not in st.session_state:
+        st.session_state[f'{panel}_params'] = {}
+    if f'{panel}_analysis' not in st.session_state:
+        st.session_state[f'{panel}_analysis'] = None
+    if f'{panel}_clinical' not in st.session_state:
+        st.session_state[f'{panel}_clinical'] = {}
+
 if 'patient_info' not in st.session_state:
     st.session_state.patient_info = {}
 if 'extracted_text' not in st.session_state:
     st.session_state.extracted_text = ""
-if 'analysis_results' not in st.session_state:
-    st.session_state.analysis_results = None
 if 'ai_review_text' not in st.session_state:
     st.session_state.ai_review_text = None
-if 'lft_parameters' not in st.session_state:
-    st.session_state.lft_parameters = {}
-if 'lft_clinical' not in st.session_state:
-    st.session_state.lft_clinical = {}
-if 'lft_analysis_results' not in st.session_state:
-    st.session_state.lft_analysis_results = None
-if 'active_panel' not in st.session_state:
-    st.session_state.active_panel = 'CBC'
+if 'active_panels' not in st.session_state:
+    st.session_state.active_panels = ['CBC']
 
-# ── Sidebar ─────────────────────────────────────────────────────────
+# ── Sidebar ─────────────────────────────────────────────────────
 with st.sidebar:
-    st.image("https://img.icons8.com/color/96/000000/blood-sample.png", width=80)
-    st.title("⚕️ Settings")
-
+    st.title("⚕️ Configuration")
+    
     api_key = st.text_input(
-        "Claude API Key",
-        type="password",
-        help="Enter your Anthropic API key for AI-powered analysis",
+        "Claude API Key", type="password",
+        help="Enter your Anthropic API key for AI analysis",
         value=os.environ.get("ANTHROPIC_API_KEY", "")
     )
-
+    
     st.divider()
-
-    st.subheader("🔬 Analysis Panel")
-    panel_choice = st.radio(
-        "Select Analysis Panel",
-        ["CBC (Complete Blood Count)", "LFT (Liver Function Tests)", "Combined Panel"],
-        index=0
+    st.subheader("🔬 Active Panels")
+    st.session_state.active_panels = st.multiselect(
+        "Select investigation panels",
+        PANELS,
+        default=st.session_state.active_panels,
+        help="Choose which panels to analyze"
     )
-    if "CBC" in panel_choice:
-        st.session_state.active_panel = 'CBC'
-    elif "LFT" in panel_choice:
-        st.session_state.active_panel = 'LFT'
-    else:
-        st.session_state.active_panel = 'Combined'
-
+    
     st.divider()
-
-    sex = st.selectbox("Patient Sex (for reference ranges)", ["Default", "Male", "Female"])
+    st.subheader("👤 Patient Info")
+    sex = st.selectbox("Sex", ["Default", "Male", "Female"])
     st.session_state.patient_info['sex'] = sex
-
+    age = st.number_input("Age", 0, 120, 
+                          value=int(st.session_state.patient_info.get('age', 0) or 0))
+    st.session_state.patient_info['age'] = str(age) if age > 0 else ''
+    
     st.divider()
-    st.markdown("### 📖 About")
-    st.info(
-        "This tool analyzes blood investigation reports using OCR extraction and "
-        "AI-powered clinical interpretation. Upload reports or enter values manually."
-    )
-    st.warning(
-        "⚠️ **Disclaimer:** For educational purposes only. "
-        "Not for clinical decision-making. Always consult qualified professionals."
-    )
+    st.warning("⚠️ **Educational tool only.** Not for clinical decisions.")
 
-# ── Header ──────────────────────────────────────────────────────────
+# ── Header ──────────────────────────────────────────────────────
 st.markdown("""
 <div class="main-header">
-    <h1>🩸 Blood Investigation Analysis Tool</h1>
-    <p>AI-Powered Hematology & Clinical Pathology Analysis Platform</p>
+    <h1>🩸 Comprehensive Lab Investigation Analysis Tool</h1>
+    <p>AI-Powered Multi-Panel Clinical Laboratory Analysis Platform</p>
+    <p style="font-size:0.85em; opacity:0.8;">CBC • LFT • KFT • Lipid Profile • Blood Sugar • Urine R/M • TFT • Rheumatology • Oncology</p>
 </div>
 """, unsafe_allow_html=True)
 
 
-# ════════════════════════════════════════════════════════════════════
-#  HELPER FUNCTIONS
-# ════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# HELPER FUNCTIONS
+# ═══════════════════════════════════════════════════════════
 
 def render_status_badge(status: str) -> str:
-    """Return HTML badge for a parameter status."""
-    if 'critical' in status:
+    if 'critical' in str(status):
         return '<span class="critical-badge">⚠️ CRITICAL</span>'
-    elif status in ('low', 'high'):
-        return '<span class="abnormal-badge">⬆ ABNORMAL</span>' if status == 'high' else '<span class="abnormal-badge">⬇ ABNORMAL</span>'
+    elif status in ('low', 'high', 'abnormal'):
+        icon = '⬆' if status == 'high' else '⬇' if status == 'low' else '⚡'
+        return f'<span class="abnormal-badge">{icon} ABNORMAL</span>'
     elif status == 'normal':
         return '<span class="normal-badge">✅ NORMAL</span>'
     return ''
 
 
-def create_gauge_chart(value: float, low: float, high: float, title: str, unit: str) -> go.Figure:
-    """Create a gauge chart for a parameter."""
-    range_span = high - low
+def create_gauge_chart(value, low, high, title, unit):
+    span = high - low if high != low else 1
     fig = go.Figure(go.Indicator(
-        mode="gauge+number+delta",
+        mode="gauge+number",
         value=value,
-        title={'text': f"{title} ({unit})", 'font': {'size': 14}},
-        number={'font': {'size': 20}},
+        title={'text': f"{title} ({unit})", 'font': {'size': 13}},
+        number={'font': {'size': 18}},
         gauge={
-            'axis': {'range': [low - range_span, high + range_span], 'tickwidth': 1},
+            'axis': {'range': [low - span, high + span]},
             'bar': {'color': "#667eea"},
-            'bgcolor': "white",
             'steps': [
-                {'range': [low - range_span, low], 'color': '#fee'},
+                {'range': [low - span, low], 'color': '#fee'},
                 {'range': [low, high], 'color': '#d4edda'},
-                {'range': [high, high + range_span], 'color': '#fff3cd'},
+                {'range': [high, high + span], 'color': '#fff3cd'},
             ],
-            'threshold': {
-                'line': {'color': "red", 'width': 2},
-                'thickness': 0.75,
-                'value': value
-            }
+            'threshold': {'line': {'color': "red", 'width': 2}, 'thickness': 0.75, 'value': value}
         }
     ))
-    fig.update_layout(height=200, margin=dict(l=20, r=20, t=40, b=20))
+    fig.update_layout(height=180, margin=dict(l=15, r=15, t=35, b=15))
     return fig
 
 
-def create_parameter_bar_chart(analysis: Dict) -> go.Figure:
-    """Create a horizontal bar chart showing all parameters relative to normal range."""
-    params_data = analysis.get('parameters', {})
-    names, deviations, colors = [], [], []
-
-    for name, data in params_data.items():
-        classification = data.get('classification', {})
-        ref_low = classification.get('low')
-        ref_high = classification.get('high')
-        val = data.get('value')
-        if ref_low is None or ref_high is None or val is None:
+def create_panel_deviation_chart(analysis_results: Dict) -> go.Figure:
+    params = analysis_results.get('parameters', {})
+    names, devs, colors = [], [], []
+    for name, data in params.items():
+        c = data.get('classification', {})
+        low, high, val = c.get('low'), c.get('high'), data.get('value')
+        if low is None or high is None or val is None:
             continue
-        mid = (ref_low + ref_high) / 2
-        ref_range = ref_high - ref_low
-        if ref_range == 0:
+        mid = (low + high) / 2
+        span = (high - low) / 2
+        if span == 0:
             continue
-        deviation = ((val - mid) / (ref_range / 2)) * 100
-        status = classification.get('status', 'normal')
-        color = '#e74c3c' if 'critical' in status else '#f39c12' if status in ('low', 'high') else '#27ae60'
+        dev = ((val - mid) / span) * 100
+        status = c.get('status', 'normal')
+        color = '#e74c3c' if 'critical' in str(status) else '#f39c12' if status in ('low', 'high') else '#27ae60'
         names.append(name)
-        deviations.append(deviation)
+        devs.append(dev)
         colors.append(color)
 
     fig = go.Figure(go.Bar(
-        x=deviations, y=names, orientation='h',
-        marker_color=colors,
-        text=[f"{d:+.0f}%" for d in deviations],
-        textposition='outside'
+        x=devs, y=names, orientation='h', marker_color=colors,
+        text=[f"{d:+.0f}%" for d in devs], textposition='outside'
     ))
     fig.add_vrect(x0=-100, x1=100, fillcolor="green", opacity=0.05, line_width=0)
     fig.add_vline(x=0, line_dash="dash", line_color="gray")
     fig.update_layout(
-        title="Parameter Deviation from Normal Range",
-        xaxis_title="% Deviation from midpoint of normal range",
-        yaxis_title="", height=max(300, len(names) * 35),
-        margin=dict(l=120, r=40, t=40, b=40)
+        title="Parameter Deviation from Normal",
+        xaxis_title="% Deviation", yaxis_title="",
+        height=max(250, len(names) * 30),
+        margin=dict(l=140, r=40, t=40, b=30)
     )
     return fig
 
 
-# ════════════════════════════════════════════════════════════════════
-#  CBC PANEL
-# ════════════════════════════════════════════════════════════════════
+def render_parameter_entry(panel_name: str, param_configs: List[Dict]):
+    """Generic parameter entry widget for any panel."""
+    params = st.session_state.get(f'{panel_name}_params', {})
+    
+    # Group into rows of 3-4
+    cols_per_row = 3
+    for i in range(0, len(param_configs), cols_per_row):
+        batch = param_configs[i:i + cols_per_row]
+        cols = st.columns(len(batch))
+        for j, cfg in enumerate(batch):
+            with cols[j]:
+                key = cfg['key']
+                label = cfg.get('label', key)
+                unit = cfg.get('unit', '')
+                mn = cfg.get('min', 0.0)
+                mx = cfg.get('max', 10000.0)
+                step = cfg.get('step', 0.1)
+                is_text = cfg.get('text', False)
+                
+                current = params.get(key, {}).get('value', 0.0 if not is_text else '')
+                
+                if is_text:
+                    val = st.text_input(
+                        f"{label} ({unit})" if unit else label,
+                        value=str(current) if current else '',
+                        key=f"entry_{panel_name}_{key}"
+                    )
+                    if val:
+                        params[key] = {'value': val, 'unit': unit}
+                else:
+                    val = st.number_input(
+                        f"{label} ({unit})" if unit else label,
+                        min_value=float(mn), max_value=float(mx),
+                        value=float(current) if current else 0.0,
+                        step=float(step),
+                        key=f"entry_{panel_name}_{key}"
+                    )
+                    if val > 0:
+                        params[key] = {'value': val, 'unit': unit}
+    
+    st.session_state[f'{panel_name}_params'] = params
 
-def render_cbc_panel():
-    """Render the CBC analysis panel."""
 
-    tab_upload, tab_manual, tab_analysis, tab_lft_sub, tab_ai, tab_report = st.tabs([
-        "📤 Upload Report", "✏️ Manual Entry", "📊 CBC Analysis",
-        "🧬 LFT (if combined)", "🤖 AI Review", "📄 Report"
-    ])
-
-    # ── Tab 1: Upload ───────────────────────────────────────────────
-    with tab_upload:
-        st.subheader("📤 Upload Blood Investigation Report")
-        st.write("Upload PDF or image files (JPG, JPEG, PNG) of blood reports.")
-
-        uploaded_files = st.file_uploader(
-            "Choose file(s)",
-            type=['pdf', 'jpg', 'jpeg', 'png'],
-            accept_multiple_files=True,
-            help="Upload one or more blood investigation reports"
-        )
-
-        if uploaded_files:
-            for uploaded_file in uploaded_files:
-                with st.expander(f"📄 {uploaded_file.name}", expanded=True):
-                    col1, col2 = st.columns([1, 1])
-
-                    with col1:
-                        if uploaded_file.type in ['image/jpeg', 'image/jpg', 'image/png']:
-                            from PIL import Image
-                            image = Image.open(uploaded_file)
-                            st.image(image, caption=uploaded_file.name, use_container_width=True)
-                            uploaded_file.seek(0)
-
-                    with col2:
-                        with st.spinner("Extracting data..."):
-                            text, params, info = process_uploaded_file(uploaded_file)
-
-                        st.text_area("Extracted Text", text, height=200, key=f"text_{uploaded_file.name}")
-
-                        if params:
-                            st.success(f"✅ Extracted {len(params)} parameters")
-                            for k, v in params.items():
-                                st.session_state.parameters[k] = v
-                        else:
-                            st.warning("No parameters extracted. Try manual entry.")
-
-                        if info:
-                            for k, v in info.items():
-                                st.session_state.patient_info[k] = v
-
-                        st.session_state.extracted_text += text + "\n"
-
-            if st.session_state.parameters:
-                st.success(f"Total parameters loaded: {len(st.session_state.parameters)}")
-
-    # ── Tab 2: Manual Entry ─────────────────────────────────────────
-    with tab_manual:
-        st.subheader("✏️ Manual Parameter Entry")
-        st.write("Enter or edit blood investigation values manually.")
-
-        # Patient info
-        with st.expander("👤 Patient Information", expanded=False):
-            pc1, pc2, pc3 = st.columns(3)
-            with pc1:
-                st.session_state.patient_info['name'] = st.text_input(
-                    "Patient Name",
-                    value=st.session_state.patient_info.get('name', '')
+def render_analysis_results(panel_name: str, analysis: Dict):
+    """Generic analysis results renderer."""
+    if not analysis:
+        st.info("Run the analysis to see results.")
+        return
+    
+    # Summary metrics
+    cols = st.columns(4)
+    with cols[0]:
+        st.metric("Total Parameters", analysis.get('total_parameters', 0))
+    with cols[1]:
+        st.metric("Abnormal", analysis.get('abnormal_count', 0),
+                  delta=f"{analysis.get('abnormal_count',0)} abnormal" if analysis.get('abnormal_count',0) > 0 else None,
+                  delta_color="inverse")
+    with cols[2]:
+        st.metric("Critical", analysis.get('critical_count', 0),
+                  delta="⚠️ ALERT" if analysis.get('critical_count',0) > 0 else None,
+                  delta_color="inverse")
+    with cols[3]:
+        normal = analysis.get('total_parameters', 0) - analysis.get('abnormal_count', 0)
+        st.metric("Normal", normal)
+    
+    # Critical alerts
+    if analysis.get('critical_values'):
+        st.error("🚨 **CRITICAL VALUES DETECTED**")
+        for cv in analysis['critical_values']:
+            st.markdown(f"**{cv['parameter']}**: {cv.get('message', cv.get('value', ''))}")
+    
+    # Quality checks
+    if analysis.get('quality_checks'):
+        with st.expander("🔍 Quality Assessment", expanded=True):
+            for check in analysis['quality_checks']:
+                sev = check.get('severity', 'info')
+                icon = {'pass':'✅','info':'ℹ️','warning':'⚠️','error':'❌'}.get(sev,'❓')
+                css = f"quality-{sev}"
+                st.markdown(
+                    f'<div class="diagnosis-card {css}"><strong>{icon} {check.get("rule","")}</strong><br>'
+                    f'{check.get("interpretation","")}</div>', unsafe_allow_html=True
                 )
-            with pc2:
-                st.session_state.patient_info['age'] = st.text_input(
-                    "Age",
-                    value=st.session_state.patient_info.get('age', '')
+    
+    # Deviation chart
+    if analysis.get('parameters'):
+        fig = create_panel_deviation_chart(analysis)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Detailed parameters
+    with st.expander("📋 Detailed Parameter Analysis", expanded=True):
+        for pname, pdata in analysis.get('parameters', {}).items():
+            c = pdata.get('classification', {})
+            status = c.get('status', 'unknown')
+            badge = render_status_badge(status)
+            st.markdown(f"### {pname} {badge}", unsafe_allow_html=True)
+            
+            c1, c2 = st.columns([2, 3])
+            with c1:
+                low, high = c.get('low'), c.get('high')
+                if low is not None and high is not None and isinstance(pdata.get('value'), (int, float)):
+                    fig = create_gauge_chart(pdata['value'], low, high, pname, pdata.get('unit',''))
+                    st.plotly_chart(fig, use_container_width=True)
+            with c2:
+                st.markdown(f"**Value:** {pdata.get('value','')} {pdata.get('unit','')}")
+                st.markdown(f"**Status:** {c.get('message','')}")
+                
+                diff = pdata.get('differential')
+                if diff:
+                    st.markdown(f"**{diff.get('title','')}**")
+                    for k, d in enumerate(diff.get('differentials',[]), 1):
+                        st.markdown(
+                            f'<div class="diagnosis-card"><strong>{k}. {d["condition"]}</strong><br>'
+                            f'{d["discussion"]}</div>', unsafe_allow_html=True
+                        )
+                
+                # Learning content
+                learning = pdata.get('learning')
+                if learning:
+                    st.markdown(
+                        f'<div class="learning-card">📚 <strong>Learning Point:</strong> {learning}</div>',
+                        unsafe_allow_html=True
+                    )
+            st.divider()
+    
+    # Calculated indices
+    if analysis.get('calculated_indices'):
+        with st.expander("🧮 Calculated Indices", expanded=False):
+            for idx_name, idx_data in analysis['calculated_indices'].items():
+                st.markdown(
+                    f'<div class="diagnosis-card"><strong>{idx_name}: {idx_data.get("value","")}</strong><br>'
+                    f'Formula: {idx_data.get("formula","")}<br>'
+                    f'Interpretation: {idx_data.get("interpretation","")}<br>'
+                    f'<em>{idx_data.get("note","")}</em></div>', unsafe_allow_html=True
                 )
-            with pc3:
-                st.session_state.patient_info['date'] = st.text_input(
-                    "Report Date",
-                    value=st.session_state.patient_info.get('date', '')
+    
+    # Overall pattern / summary
+    if analysis.get('pattern_summary'):
+        with st.expander("🔬 Pattern Recognition & Summary", expanded=True):
+            st.markdown(analysis['pattern_summary'])
+    
+    # Recommendations
+    if analysis.get('recommendations'):
+        with st.expander("📋 Recommendations", expanded=False):
+            for i, rec in enumerate(analysis['recommendations'], 1):
+                st.markdown(
+                    f'<div class="step-box"><strong>{i}. {rec.get("title","")}</strong><br>'
+                    f'{rec.get("description","")}</div>', unsafe_allow_html=True
                 )
+    
+    # Educational content
+    if analysis.get('educational_content'):
+        with st.expander("📚 Educational Summary & Learning Points", expanded=False):
+            st.markdown(analysis['educational_content'])
 
-        # RBC Parameters
-        st.markdown("#### 🔴 Red Blood Cell Parameters")
-        rbc_cols = st.columns(4)
-        rbc_params = [
-            ('RBC', 'x10¹²/L', 0.0, 10.0, 0.1),
-            ('Hemoglobin', 'g/dL', 0.0, 25.0, 0.1),
-            ('Hematocrit', '%', 0.0, 70.0, 0.1),
-            ('MCV', 'fL', 0.0, 150.0, 0.1),
-        ]
-        for i, (name, unit, mn, mx, step) in enumerate(rbc_params):
-            with rbc_cols[i]:
-                current = st.session_state.parameters.get(name, {}).get('value', 0.0)
-                val = st.number_input(f"{name} ({unit})", min_value=mn, max_value=mx, value=float(current), step=step, key=f"man_{name}")
-                if val > 0:
-                    st.session_state.parameters[name] = {'value': val, 'unit': unit}
 
-        rbc_cols2 = st.columns(4)
-        rbc_params2 = [
-            ('MCH', 'pg', 0.0, 50.0, 0.1),
-            ('MCHC', 'g/dL', 0.0, 45.0, 0.1),
-            ('RDW', '%', 0.0, 35.0, 0.1),
-            ('Reticulocytes', '%', 0.0, 20.0, 0.1),
-        ]
-        for i, (name, unit, mn, mx, step) in enumerate(rbc_params2):
-            with rbc_cols2[i]:
-                current = st.session_state.parameters.get(name, {}).get('value', 0.0)
-                val = st.number_input(f"{name} ({unit})", min_value=mn, max_value=mx, value=float(current), step=step, key=f"man_{name}")
-                if val > 0:
-                    st.session_state.parameters[name] = {'value': val, 'unit': unit}
-
-        # WBC Parameters
-        st.markdown("#### ⚪ White Blood Cell Parameters")
-        wbc_cols = st.columns(3)
-        wbc_params = [
-            ('WBC', 'x10⁹/L', 0.0, 100.0, 0.1),
-            ('Neutrophils', '%', 0.0, 100.0, 0.1),
-            ('Lymphocytes', '%', 0.0, 100.0, 0.1),
-        ]
-        for i, (name, unit, mn, mx, step) in enumerate(wbc_params):
-            with wbc_cols[i]:
-                current = st.session_state.parameters.get(name, {}).get('value', 0.0)
-                val = st.number_input(f"{name} ({unit})", min_value=mn, max_value=mx, value=float(current), step=step, key=f"man_{name}")
-                if val > 0:
-                    st.session_state.parameters[name] = {'value': val, 'unit': unit}
-
-        wbc_cols2 = st.columns(3)
-        wbc_params2 = [
-            ('Monocytes', '%', 0.0, 30.0, 0.1),
-            ('Eosinophils', '%', 0.0, 30.0, 0.1),
-            ('Basophils', '%', 0.0, 10.0, 0.1),
-        ]
-        for i, (name, unit, mn, mx, step) in enumerate(wbc_params2):
-            with wbc_cols2[i]:
-                current = st.session_state.parameters.get(name, {}).get('value', 0.0)
-                val = st.number_input(f"{name} ({unit})", min_value=mn, max_value=mx, value=float(current), step=step, key=f"man_{name}")
-                if val > 0:
-                    st.session_state.parameters[name] = {'value': val, 'unit': unit}
-
-        # Platelet Parameters
-        st.markdown("#### 🟣 Platelet Parameters")
-        plt_cols = st.columns(3)
-        plt_params = [
-            ('Platelets', 'x10⁹/L', 0.0, 1500.0, 1.0),
-            ('MPV', 'fL', 0.0, 20.0, 0.1),
-            ('PDW', 'fL', 0.0, 30.0, 0.1),
-        ]
-        for i, (name, unit, mn, mx, step) in enumerate(plt_params):
-            with plt_cols[i]:
-                current = st.session_state.parameters.get(name, {}).get('value', 0.0)
-                val = st.number_input(f"{name} ({unit})", min_value=mn, max_value=mx, value=float(current), step=step, key=f"man_{name}")
-                if val > 0:
-                    st.session_state.parameters[name] = {'value': val, 'unit': unit}
-
-        # Additional
-        st.markdown("#### 🔬 Additional Parameters")
-        add_cols = st.columns(3)
-        add_params = [
-            ('ESR', 'mm/hr', 0.0, 150.0, 1.0),
-            ('ANC', 'x10⁹/L', 0.0, 30.0, 0.01),
-            ('ALC', 'x10⁹/L', 0.0, 20.0, 0.01),
-        ]
-        for i, (name, unit, mn, mx, step) in enumerate(add_params):
-            with add_cols[i]:
-                current = st.session_state.parameters.get(name, {}).get('value', 0.0)
-                val = st.number_input(f"{name} ({unit})", min_value=mn, max_value=mx, value=float(current), step=step, key=f"man_{name}")
-                if val > 0:
-                    st.session_state.parameters[name] = {'value': val, 'unit': unit}
-
-        # Delete parameters
-        st.markdown("---")
+def render_delete_section(panel_name: str):
+    """Generic parameter deletion section."""
+    params = st.session_state.get(f'{panel_name}_params', {})
+    if params:
         st.markdown("#### 🗑️ Remove Parameters")
-        if st.session_state.parameters:
-            params_to_delete = st.multiselect(
-                "Select parameters to remove",
-                options=list(st.session_state.parameters.keys())
-            )
-            if st.button("🗑️ Remove Selected") and params_to_delete:
-                for p in params_to_delete:
-                    del st.session_state.parameters[p]
+        to_delete = st.multiselect(
+            "Select parameters to remove",
+            options=list(params.keys()),
+            key=f"del_{panel_name}"
+        )
+        if st.button(f"🗑️ Remove Selected", key=f"delbtn_{panel_name}"):
+            for p in to_delete:
+                del st.session_state[f'{panel_name}_params'][p]
+            st.rerun()
+
+
+def render_add_custom_section(panel_name: str):
+    """Allow adding custom parameters not in the predefined list."""
+    st.markdown("#### ➕ Add Custom Parameter")
+    ac1, ac2, ac3, ac4 = st.columns([3, 2, 2, 1])
+    with ac1:
+        custom_name = st.text_input("Parameter Name", key=f"custom_name_{panel_name}")
+    with ac2:
+        custom_value = st.text_input("Value", key=f"custom_val_{panel_name}")
+    with ac3:
+        custom_unit = st.text_input("Unit", key=f"custom_unit_{panel_name}")
+    with ac4:
+        st.write("")
+        st.write("")
+        if st.button("➕ Add", key=f"custom_add_{panel_name}"):
+            if custom_name and custom_value:
+                try:
+                    val = float(custom_value)
+                except ValueError:
+                    val = custom_value
+                st.session_state[f'{panel_name}_params'][custom_name] = {
+                    'value': val, 'unit': custom_unit
+                }
                 st.rerun()
 
-        # Current parameters summary
-        if st.session_state.parameters:
-            st.markdown("---")
-            st.markdown("#### 📋 Current Parameter Summary")
-            df_data = []
-            for name, data in st.session_state.parameters.items():
-                ref = get_reference_range(name, sex)
-                df_data.append({
-                    'Parameter': name,
-                    'Value': data.get('value', ''),
-                    'Unit': data.get('unit', ''),
-                    'Ref Low': ref.get('low', ''),
-                    'Ref High': ref.get('high', ''),
-                })
-            st.dataframe(pd.DataFrame(df_data), use_container_width=True)
 
-    # ── Tab 3: CBC Analysis ─────────────────────────────────────────
-    with tab_analysis:
-        st.subheader("📊 CBC Analysis Results")
+def render_current_params_table(panel_name: str):
+    """Show current parameters as a table."""
+    params = st.session_state.get(f'{panel_name}_params', {})
+    if params:
+        st.markdown("#### 📋 Current Parameters")
+        rows = []
+        for name, data in params.items():
+            rows.append({
+                'Parameter': name,
+                'Value': data.get('value', ''),
+                'Unit': data.get('unit', '')
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-        if not st.session_state.parameters:
-            st.info("Please upload a report or enter values manually first.")
-        else:
-            if st.button("🔬 Run CBC Analysis", type="primary", key="run_cbc"):
-                with st.spinner("Analyzing..."):
-                    st.session_state.analysis_results = analyze_all_parameters(
-                        st.session_state.parameters, sex
-                    )
 
-            if st.session_state.analysis_results:
-                analysis = st.session_state.analysis_results
+# ═══════════════════════════════════════════════════════════
+# PANEL CONFIGURATIONS (parameter entry definitions)
+# ═══════════════════════════════════════════════════════════
 
-                # Summary cards
-                sc1, sc2, sc3, sc4 = st.columns(4)
-                with sc1:
-                    st.metric("Total Parameters", analysis['total_parameters'])
-                with sc2:
-                    st.metric("Abnormal", analysis['abnormal_count'],
-                              delta=None if analysis['abnormal_count'] == 0 else f"{analysis['abnormal_count']} abnormal",
-                              delta_color="inverse")
-                with sc3:
-                    st.metric("Critical Values", analysis['critical_count'],
-                              delta=None if analysis['critical_count'] == 0 else "⚠️ ALERT",
-                              delta_color="inverse")
-                with sc4:
-                    normal = analysis['total_parameters'] - analysis['abnormal_count']
-                    st.metric("Normal", normal)
+CBC_PARAMS = [
+    {'key': 'RBC', 'label': 'RBC', 'unit': 'x10¹²/L', 'max': 10.0, 'step': 0.01},
+    {'key': 'Hemoglobin', 'label': 'Hemoglobin', 'unit': 'g/dL', 'max': 25.0},
+    {'key': 'Hematocrit', 'label': 'Hematocrit', 'unit': '%', 'max': 70.0},
+    {'key': 'MCV', 'label': 'MCV', 'unit': 'fL', 'max': 150.0},
+    {'key': 'MCH', 'label': 'MCH', 'unit': 'pg', 'max': 50.0},
+    {'key': 'MCHC', 'label': 'MCHC', 'unit': 'g/dL', 'max': 45.0},
+    {'key': 'RDW', 'label': 'RDW-CV', 'unit': '%', 'max': 35.0},
+    {'key': 'Reticulocytes', 'label': 'Reticulocytes', 'unit': '%', 'max': 20.0},
+    {'key': 'WBC', 'label': 'WBC', 'unit': 'x10⁹/L', 'max': 100.0},
+    {'key': 'Neutrophils', 'label': 'Neutrophils', 'unit': '%', 'max': 100.0},
+    {'key': 'Lymphocytes', 'label': 'Lymphocytes', 'unit': '%', 'max': 100.0},
+    {'key': 'Monocytes', 'label': 'Monocytes', 'unit': '%', 'max': 30.0},
+    {'key': 'Eosinophils', 'label': 'Eosinophils', 'unit': '%', 'max': 30.0},
+    {'key': 'Basophils', 'label': 'Basophils', 'unit': '%', 'max': 10.0},
+    {'key': 'Platelets', 'label': 'Platelets', 'unit': 'x10⁹/L', 'max': 1500.0, 'step': 1.0},
+    {'key': 'MPV', 'label': 'MPV', 'unit': 'fL', 'max': 20.0},
+    {'key': 'PDW', 'label': 'PDW', 'unit': 'fL', 'max': 30.0},
+    {'key': 'ESR', 'label': 'ESR', 'unit': 'mm/hr', 'max': 150.0, 'step': 1.0},
+]
 
-                # Critical values alert
-                if analysis['critical_values']:
-                    st.markdown('<div class="critical-alert">', unsafe_allow_html=True)
-                    st.error("🚨 CRITICAL VALUES DETECTED - Immediate clinical attention required!")
-                    for cv in analysis['critical_values']:
-                        st.markdown(f"**{cv['parameter']}**: {cv['message']}")
-                    st.markdown('</div>', unsafe_allow_html=True)
+LFT_PARAMS = [
+    {'key': 'ALT', 'label': 'ALT (SGPT)', 'unit': 'IU/L', 'max': 10000.0},
+    {'key': 'AST', 'label': 'AST (SGOT)', 'unit': 'IU/L', 'max': 10000.0},
+    {'key': 'ALP', 'label': 'Alkaline Phosphatase', 'unit': 'IU/L', 'max': 5000.0},
+    {'key': 'GGT', 'label': 'GGT', 'unit': 'IU/L', 'max': 5000.0},
+    {'key': 'Total_Bilirubin', 'label': 'Total Bilirubin', 'unit': 'mg/dL', 'max': 50.0},
+    {'key': 'Direct_Bilirubin', 'label': 'Direct Bilirubin', 'unit': 'mg/dL', 'max': 30.0},
+    {'key': 'Indirect_Bilirubin', 'label': 'Indirect Bilirubin', 'unit': 'mg/dL', 'max': 30.0},
+    {'key': 'Total_Protein', 'label': 'Total Protein', 'unit': 'g/dL', 'max': 15.0},
+    {'key': 'Albumin', 'label': 'Albumin', 'unit': 'g/dL', 'max': 6.0},
+    {'key': 'Globulin', 'label': 'Globulin', 'unit': 'g/dL', 'max': 10.0},
+    {'key': 'AG_Ratio', 'label': 'A/G Ratio', 'unit': '', 'max': 5.0, 'step': 0.01},
+    {'key': 'LDH', 'label': 'LDH', 'unit': 'IU/L', 'max': 5000.0},
+    {'key': 'PT', 'label': 'PT', 'unit': 'seconds', 'max': 100.0},
+    {'key': 'INR', 'label': 'INR', 'unit': '', 'max': 20.0, 'step': 0.01},
+]
 
-                # Quality assessment
-                with st.expander("🔍 Sample Quality Assessment", expanded=True):
-                    for check in analysis['quality_checks']:
-                        sev = check['severity']
-                        css = f"quality-{sev}"
-                        icon = {'pass': '✅', 'info': 'ℹ️', 'warning': '⚠️', 'error': '❌'}.get(sev, '❓')
-                        st.markdown(
-                            f'<div class="diagnosis-card {css}">'
-                            f'<strong>{icon} {check["rule"]}</strong><br>'
-                            f'Expected: {check["expected"]} | Actual: {check["actual"]}<br>'
-                            f'<em>{check["interpretation"]}</em></div>',
-                            unsafe_allow_html=True
-                        )
+KFT_PARAMS = [
+    {'key': 'Creatinine', 'label': 'Creatinine', 'unit': 'mg/dL', 'max': 30.0, 'step': 0.01},
+    {'key': 'BUN', 'label': 'BUN', 'unit': 'mg/dL', 'max': 200.0},
+    {'key': 'Urea', 'label': 'Urea', 'unit': 'mg/dL', 'max': 400.0},
+    {'key': 'Uric_Acid', 'label': 'Uric Acid', 'unit': 'mg/dL', 'max': 20.0},
+    {'key': 'eGFR', 'label': 'eGFR', 'unit': 'mL/min/1.73m²', 'max': 200.0, 'step': 1.0},
+    {'key': 'Cystatin_C', 'label': 'Cystatin C', 'unit': 'mg/L', 'max': 10.0, 'step': 0.01},
+    {'key': 'Sodium', 'label': 'Sodium', 'unit': 'mEq/L', 'max': 180.0, 'step': 0.1},
+    {'key': 'Potassium', 'label': 'Potassium', 'unit': 'mEq/L', 'max': 10.0, 'step': 0.01},
+    {'key': 'Chloride', 'label': 'Chloride', 'unit': 'mEq/L', 'max': 130.0},
+    {'key': 'Bicarbonate', 'label': 'Bicarbonate (CO2)', 'unit': 'mEq/L', 'max': 50.0},
+    {'key': 'Calcium', 'label': 'Calcium', 'unit': 'mg/dL', 'max': 20.0, 'step': 0.01},
+    {'key': 'Phosphorus', 'label': 'Phosphorus', 'unit': 'mg/dL', 'max': 15.0, 'step': 0.1},
+    {'key': 'Magnesium', 'label': 'Magnesium', 'unit': 'mg/dL', 'max': 10.0, 'step': 0.01},
+]
 
-                # Parameter deviation chart
-                st.plotly_chart(create_parameter_bar_chart(analysis), use_container_width=True)
+LIPID_PARAMS = [
+    {'key': 'Total_Cholesterol', 'label': 'Total Cholesterol', 'unit': 'mg/dL', 'max': 600.0, 'step': 1.0},
+    {'key': 'HDL', 'label': 'HDL-C', 'unit': 'mg/dL', 'max': 200.0, 'step': 1.0},
+    {'key': 'LDL', 'label': 'LDL-C', 'unit': 'mg/dL', 'max': 500.0, 'step': 1.0},
+    {'key': 'VLDL', 'label': 'VLDL-C', 'unit': 'mg/dL', 'max': 200.0, 'step': 1.0},
+    {'key': 'Triglycerides', 'label': 'Triglycerides', 'unit': 'mg/dL', 'max': 2000.0, 'step': 1.0},
+    {'key': 'Non_HDL', 'label': 'Non-HDL Cholesterol', 'unit': 'mg/dL', 'max': 500.0, 'step': 1.0},
+    {'key': 'TC_HDL_Ratio', 'label': 'TC/HDL Ratio', 'unit': '', 'max': 20.0, 'step': 0.1},
+    {'key': 'LDL_HDL_Ratio', 'label': 'LDL/HDL Ratio', 'unit': '', 'max': 15.0, 'step': 0.1},
+    {'key': 'ApoA1', 'label': 'Apolipoprotein A1', 'unit': 'mg/dL', 'max': 300.0},
+    {'key': 'ApoB', 'label': 'Apolipoprotein B', 'unit': 'mg/dL', 'max': 300.0},
+    {'key': 'Lp_a', 'label': 'Lipoprotein(a)', 'unit': 'nmol/L', 'max': 500.0},
+]
 
-                # Detailed parameter analysis
-                with st.expander("📋 Detailed Parameter Analysis", expanded=True):
-                    for param_name, param_data in analysis['parameters'].items():
-                        classification = param_data['classification']
-                        status = classification.get('status', 'unknown')
-                        badge = render_status_badge(status)
+SUGAR_PARAMS = [
+    {'key': 'Fasting_Glucose', 'label': 'Fasting Blood Glucose', 'unit': 'mg/dL', 'max': 600.0, 'step': 1.0},
+    {'key': 'Random_Glucose', 'label': 'Random Blood Glucose', 'unit': 'mg/dL', 'max': 800.0, 'step': 1.0},
+    {'key': 'PP_Glucose', 'label': 'Post-Prandial Glucose', 'unit': 'mg/dL', 'max': 600.0, 'step': 1.0},
+    {'key': 'HbA1c', 'label': 'HbA1c', 'unit': '%', 'max': 20.0, 'step': 0.1},
+    {'key': 'eAG', 'label': 'Estimated Average Glucose', 'unit': 'mg/dL', 'max': 500.0, 'step': 1.0},
+    {'key': 'Insulin', 'label': 'Fasting Insulin', 'unit': 'µIU/mL', 'max': 200.0, 'step': 0.1},
+    {'key': 'C_Peptide', 'label': 'C-Peptide', 'unit': 'ng/mL', 'max': 20.0, 'step': 0.01},
+    {'key': 'HOMA_IR', 'label': 'HOMA-IR', 'unit': '', 'max': 30.0, 'step': 0.1},
+]
 
-                        st.markdown(f"### {param_name} {badge}", unsafe_allow_html=True)
+URINE_PARAMS = [
+    {'key': 'Urine_Color', 'label': 'Color', 'unit': '', 'text': True},
+    {'key': 'Urine_Appearance', 'label': 'Appearance', 'unit': '', 'text': True},
+    {'key': 'Urine_pH', 'label': 'pH', 'unit': '', 'max': 14.0, 'step': 0.1},
+    {'key': 'Specific_Gravity', 'label': 'Specific Gravity', 'unit': '', 'max': 1.1, 'min': 1.0, 'step': 0.001},
+    {'key': 'Urine_Protein', 'label': 'Protein', 'unit': '', 'text': True},
+    {'key': 'Urine_Glucose', 'label': 'Glucose', 'unit': '', 'text': True},
+    {'key': 'Urine_Ketones', 'label': 'Ketones', 'unit': '', 'text': True},
+    {'key': 'Urine_Bilirubin', 'label': 'Bilirubin', 'unit': '', 'text': True},
+    {'key': 'Urine_Urobilinogen', 'label': 'Urobilinogen', 'unit': '', 'text': True},
+    {'key': 'Urine_Blood', 'label': 'Blood/Hemoglobin', 'unit': '', 'text': True},
+    {'key': 'Urine_Nitrite', 'label': 'Nitrite', 'unit': '', 'text': True},
+    {'key': 'Urine_Leukocyte_Esterase', 'label': 'Leukocyte Esterase', 'unit': '', 'text': True},
+    {'key': 'Urine_RBC', 'label': 'RBC (/hpf)', 'unit': '/hpf', 'max': 500.0, 'step': 1.0},
+    {'key': 'Urine_WBC', 'label': 'WBC (/hpf)', 'unit': '/hpf', 'max': 500.0, 'step': 1.0},
+    {'key': 'Urine_Epithelial', 'label': 'Epithelial Cells (/hpf)', 'unit': '/hpf', 'max': 100.0, 'step': 1.0},
+    {'key': 'Urine_Casts', 'label': 'Casts', 'unit': '', 'text': True},
+    {'key': 'Urine_Crystals', 'label': 'Crystals', 'unit': '', 'text': True},
+    {'key': 'Urine_Bacteria', 'label': 'Bacteria', 'unit': '', 'text': True},
+    {'key': 'Urine_Yeast', 'label': 'Yeast', 'unit': '', 'text': True},
+    {'key': 'Protein_Creatinine_Ratio', 'label': 'Protein/Creatinine Ratio', 'unit': 'mg/g', 'max': 5000.0},
+    {'key': 'Albumin_Creatinine_Ratio', 'label': 'Albumin/Creatinine Ratio', 'unit': 'mg/g', 'max': 5000.0},
+    {'key': 'Microalbumin', 'label': 'Microalbumin', 'unit': 'mg/L', 'max': 500.0},
+]
 
-                        mc1, mc2 = st.columns([2, 3])
-                        with mc1:
-                            ref_low = classification.get('low')
-                            ref_high = classification.get('high')
-                            if ref_low is not None and ref_high is not None:
-                                fig = create_gauge_chart(
-                                    param_data['value'], ref_low, ref_high,
-                                    param_name, param_data.get('unit', '')
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
+TFT_PARAMS = [
+    {'key': 'TSH', 'label': 'TSH', 'unit': 'mIU/L', 'max': 100.0, 'step': 0.01},
+    {'key': 'T3', 'label': 'Total T3', 'unit': 'ng/dL', 'max': 500.0},
+    {'key': 'T4', 'label': 'Total T4', 'unit': 'µg/dL', 'max': 25.0, 'step': 0.1},
+    {'key': 'FT3', 'label': 'Free T3', 'unit': 'pg/mL', 'max': 20.0, 'step': 0.01},
+    {'key': 'FT4', 'label': 'Free T4', 'unit': 'ng/dL', 'max': 10.0, 'step': 0.01},
+    {'key': 'Reverse_T3', 'label': 'Reverse T3', 'unit': 'ng/dL', 'max': 100.0},
+    {'key': 'T3_Uptake', 'label': 'T3 Uptake', 'unit': '%', 'max': 60.0},
+    {'key': 'Anti_TPO', 'label': 'Anti-TPO', 'unit': 'IU/mL', 'max': 2000.0},
+    {'key': 'Anti_Thyroglobulin', 'label': 'Anti-Thyroglobulin', 'unit': 'IU/mL', 'max': 2000.0},
+    {'key': 'TSH_Receptor_Ab', 'label': 'TSH Receptor Antibody', 'unit': 'IU/L', 'max': 50.0},
+    {'key': 'Thyroglobulin', 'label': 'Thyroglobulin', 'unit': 'ng/mL', 'max': 500.0},
+]
 
-                        with mc2:
-                            st.markdown(f"**Value:** {param_data['value']} {param_data.get('unit', '')}")
-                            st.markdown(f"**Status:** {classification.get('message', '')}")
+RHEUM_PARAMS = [
+    {'key': 'RF', 'label': 'Rheumatoid Factor', 'unit': 'IU/mL', 'max': 1000.0},
+    {'key': 'Anti_CCP', 'label': 'Anti-CCP', 'unit': 'U/mL', 'max': 500.0},
+    {'key': 'ANA', 'label': 'ANA Titer', 'unit': '', 'text': True},
+    {'key': 'ANA_Pattern', 'label': 'ANA Pattern', 'unit': '', 'text': True},
+    {'key': 'Anti_dsDNA', 'label': 'Anti-dsDNA', 'unit': 'IU/mL', 'max': 1000.0},
+    {'key': 'Anti_Smith', 'label': 'Anti-Smith', 'unit': 'U/mL', 'max': 500.0},
+    {'key': 'Complement_C3', 'label': 'Complement C3', 'unit': 'mg/dL', 'max': 300.0},
+    {'key': 'Complement_C4', 'label': 'Complement C4', 'unit': 'mg/dL', 'max': 80.0},
+    {'key': 'Anti_Phospholipid_IgG', 'label': 'Anti-Phospholipid IgG', 'unit': 'GPL', 'max': 200.0},
+    {'key': 'Anti_Phospholipid_IgM', 'label': 'Anti-Phospholipid IgM', 'unit': 'MPL', 'max': 200.0},
+    {'key': 'Anti_Cardiolipin_IgG', 'label': 'Anti-Cardiolipin IgG', 'unit': 'GPL', 'max': 200.0},
+    {'key': 'Anti_Cardiolipin_IgM', 'label': 'Anti-Cardiolipin IgM', 'unit': 'MPL', 'max': 200.0},
+    {'key': 'Lupus_Anticoagulant', 'label': 'Lupus Anticoagulant', 'unit': '', 'text': True},
+    {'key': 'Beta2_Glycoprotein', 'label': 'Beta-2 Glycoprotein', 'unit': 'U/mL', 'max': 200.0},
+    {'key': 'CRP', 'label': 'CRP', 'unit': 'mg/L', 'max': 500.0},
+    {'key': 'hs_CRP', 'label': 'hs-CRP', 'unit': 'mg/L', 'max': 50.0, 'step': 0.01},
+    {'key': 'ASO', 'label': 'ASO Titer', 'unit': 'IU/mL', 'max': 1000.0},
+    {'key': 'HLA_B27', 'label': 'HLA-B27', 'unit': '', 'text': True},
+]
 
-                            diff = param_data.get('differential')
-                            if diff:
-                                st.markdown(f"**{diff['title']}**")
-                                for i, d in enumerate(diff.get('differentials', []), 1):
-                                    st.markdown(
-                                        f'<div class="diagnosis-card">'
-                                        f'<strong>{i}. {d["condition"]}</strong><br>'
-                                        f'{d["discussion"]}</div>',
-                                        unsafe_allow_html=True
-                                    )
+ONCO_PARAMS = [
+    {'key': 'AFP', 'label': 'AFP', 'unit': 'ng/mL', 'max': 50000.0},
+    {'key': 'CEA', 'label': 'CEA', 'unit': 'ng/mL', 'max': 1000.0},
+    {'key': 'Onco_LDH', 'label': 'LDH', 'unit': 'IU/L', 'max': 5000.0},
+    {'key': 'Beta2_Microglobulin', 'label': 'Beta-2 Microglobulin', 'unit': 'mg/L', 'max': 30.0},
+    {'key': 'CA_19_9', 'label': 'CA 19-9', 'unit': 'U/mL', 'max': 50000.0},
+    {'key': 'CA_72_4', 'label': 'CA 72-4', 'unit': 'U/mL', 'max': 500.0},
+    {'key': 'CA_15_3', 'label': 'CA 15-3', 'unit': 'U/mL', 'max': 500.0},
+    {'key': 'CA_27_29', 'label': 'CA 27-29', 'unit': 'U/mL', 'max': 500.0},
+    {'key': 'CA_125', 'label': 'CA 125', 'unit': 'U/mL', 'max': 5000.0},
+    {'key': 'HE4', 'label': 'HE4', 'unit': 'pmol/L', 'max': 2000.0},
+    {'key': 'ROMA_Index', 'label': 'ROMA Index', 'unit': '%', 'max': 100.0},
+    {'key': 'Total_PSA', 'label': 'Total PSA', 'unit': 'ng/mL', 'max': 500.0, 'step': 0.01},
+    {'key': 'Free_PSA', 'label': 'Free PSA', 'unit': 'ng/mL', 'max': 100.0, 'step': 0.01},
+    {'key': 'PSA_Ratio', 'label': 'Free/Total PSA Ratio', 'unit': '%', 'max': 100.0},
+    {'key': 'Beta_hCG', 'label': 'Beta-hCG', 'unit': 'mIU/mL', 'max': 500000.0},
+    {'key': 'NSE', 'label': 'NSE', 'unit': 'ng/mL', 'max': 200.0},
+    {'key': 'CYFRA_21_1', 'label': 'CYFRA 21-1', 'unit': 'ng/mL', 'max': 200.0},
+    {'key': 'SCC', 'label': 'SCC Antigen', 'unit': 'ng/mL', 'max': 100.0},
+    {'key': 'ProGRP', 'label': 'ProGRP', 'unit': 'pg/mL', 'max': 5000.0},
+    {'key': 'Calcitonin', 'label': 'Calcitonin', 'unit': 'pg/mL', 'max': 1000.0},
+    {'key': 'Onco_Thyroglobulin', 'label': 'Thyroglobulin', 'unit': 'ng/mL', 'max': 500.0},
+    {'key': 'Chromogranin_A', 'label': 'Chromogranin A', 'unit': 'ng/mL', 'max': 1000.0},
+    {'key': 'Ki_67', 'label': 'Ki-67', 'unit': '%', 'max': 100.0},
+]
 
-                        st.divider()
+PANEL_PARAM_MAP = {
+    'CBC': CBC_PARAMS,
+    'LFT': LFT_PARAMS,
+    'KFT': KFT_PARAMS,
+    'Lipid': LIPID_PARAMS,
+    'Sugar': SUGAR_PARAMS,
+    'Urine': URINE_PARAMS,
+    'TFT': TFT_PARAMS,
+    'Rheumatology': RHEUM_PARAMS,
+    'Oncology': ONCO_PARAMS,
+}
 
-                # Calculated indices
-                if analysis.get('calculated_indices'):
-                    with st.expander("🧮 Calculated Indices", expanded=False):
-                        for idx_name, idx_data in analysis['calculated_indices'].items():
-                            st.markdown(
-                                f'<div class="diagnosis-card">'
-                                f'<strong>{idx_name}: {idx_data["value"]}</strong><br>'
-                                f'Formula: {idx_data["formula"]}<br>'
-                                f'Interpretation: {idx_data["interpretation"]}<br>'
-                                f'<em>{idx_data["note"]}</em></div>',
-                                unsafe_allow_html=True
-                            )
+PANEL_ANALYZER = {
+    'CBC': lambda p, s: analyze_all_parameters(p, s),
+    'LFT': lambda p, s: analyze_lft(p, {'sex': s.lower() if s != 'Default' else 'male'}),
+    'KFT': lambda p, s: analyze_kft(p, s),
+    'Lipid': lambda p, s: analyze_lipid(p, s),
+    'Sugar': lambda p, s: analyze_sugar(p, s),
+    'Urine': lambda p, s: analyze_urine(p, s),
+    'TFT': lambda p, s: analyze_tft(p, s),
+    'Rheumatology': lambda p, s: analyze_rheumatology(p, s),
+    'Oncology': lambda p, s: analyze_oncology(p, s),
+}
 
-    # ── Tab 4: LFT sub-panel (for combined mode) ───────────────────
-    with tab_lft_sub:
-        if st.session_state.active_panel == 'Combined':
-            render_lft_entry_and_analysis()
-        else:
-            st.info("Select **Combined Panel** in the sidebar to include LFT analysis here.")
+PANEL_ICONS = {
+    'CBC': '🔴', 'LFT': '🟤', 'KFT': '🟡', 'Lipid': '🟠',
+    'Sugar': '🍬', 'Urine': '🧪', 'TFT': '🦋', 
+    'Rheumatology': '🦴', 'Oncology': '🎗️',
+}
 
-    # ── Tab 5: AI Review ────────────────────────────────────────────
-    with tab_ai:
-        st.subheader("🤖 AI-Powered Clinical Review (Claude)")
 
-        if not api_key:
-            st.warning("Please enter your Claude API key in the sidebar to use AI review.")
-        elif not st.session_state.analysis_results:
-            st.info("Please run the analysis first before requesting AI review.")
-        else:
-            review_type = st.radio(
-                "Review Type",
-                ["Full CBC Review", "Single Parameter Review"],
-                horizontal=True
-            )
+# ═══════════════════════════════════════════════════════════
+# MAIN TABS
+# ═══════════════════════════════════════════════════════════
 
-            if review_type == "Full CBC Review":
-                if st.button("🧠 Generate AI Review", type="primary", key="ai_full"):
-                    with st.spinner("Claude is analyzing your results…"):
-                        review = get_ai_review(
-                            st.session_state.parameters,
-                            st.session_state.analysis_results,
-                            st.session_state.patient_info,
-                            api_key
+main_tabs = st.tabs([
+    "📤 Upload & Extract",
+    "✏️ Manual Entry",
+    "📊 Analysis",
+    "🤖 AI Review",
+    "📄 Report"
+])
+
+# ── TAB 1: Upload & Extract ─────────────────────────────────
+with main_tabs[0]:
+    st.subheader("📤 Upload Blood Investigation Reports")
+    st.write("Upload PDF or image files. The system will auto-extract parameters into the appropriate panels.")
+    
+    uploaded_files = st.file_uploader(
+        "Choose file(s)",
+        type=['pdf', 'jpg', 'jpeg', 'png'],
+        accept_multiple_files=True
+    )
+    
+    if uploaded_files:
+        for uf in uploaded_files:
+            with st.expander(f"📄 {uf.name}", expanded=True):
+                c1, c2 = st.columns([1, 1])
+                with c1:
+                    if uf.type in ['image/jpeg', 'image/jpg', 'image/png']:
+                        from PIL import Image
+                        img = Image.open(uf)
+                        st.image(img, caption=uf.name, use_container_width=True)
+                        uf.seek(0)
+                with c2:
+                    with st.spinner("Extracting data..."):
+                        text, params, info = process_uploaded_file(uf)
+                    
+                    st.text_area("Extracted Text", text, height=200, key=f"txt_{uf.name}")
+                    
+                    if params:
+                        st.success(f"✅ Extracted {len(params)} parameters")
+                        # Route to correct panel
+                        for pname, pdata in params.items():
+                            routed = False
+                            for panel, pcfg_list in PANEL_PARAM_MAP.items():
+                                panel_keys = [c['key'] for c in pcfg_list]
+                                if pname in panel_keys:
+                                    st.session_state[f'{panel}_params'][pname] = pdata
+                                    routed = True
+                                    break
+                            if not routed:
+                                st.session_state['CBC_params'][pname] = pdata
+                    else:
+                        st.warning("No parameters auto-extracted. Use manual entry.")
+                    
+                    if info:
+                        for k, v in info.items():
+                            st.session_state.patient_info[k] = v
+                    
+                    st.session_state.extracted_text += text + "\n"
+        
+        # Show summary
+        st.markdown("### 📊 Extraction Summary")
+        for panel in PANELS:
+            count = len(st.session_state.get(f'{panel}_params', {}))
+            if count > 0:
+                st.write(f"{PANEL_ICONS.get(panel,'')} **{panel}**: {count} parameters extracted")
+
+# ── TAB 2: Manual Entry ─────────────────────────────────────
+with main_tabs[1]:
+    st.subheader("✏️ Manual Parameter Entry & Editing")
+    
+    # Patient info section
+    with st.expander("👤 Patient Information", expanded=False):
+        pi1, pi2, pi3 = st.columns(3)
+        with pi1:
+            st.session_state.patient_info['name'] = st.text_input(
+                "Name", value=st.session_state.patient_info.get('name', ''))
+        with pi2:
+            st.session_state.patient_info['age'] = st.text_input(
+                "Age", value=st.session_state.patient_info.get('age', ''))
+        with pi3:
+            st.session_state.patient_info['date'] = st.text_input(
+                "Report Date", value=st.session_state.patient_info.get('date', ''))
+    
+    # Panel entry tabs
+    active = st.session_state.active_panels
+    if not active:
+        st.info("Select at least one panel in the sidebar.")
+    else:
+        panel_tabs = st.tabs([f"{PANEL_ICONS.get(p,'')} {p}" for p in active])
+        
+        for idx, panel in enumerate(active):
+            with panel_tabs[idx]:
+                st.markdown(f'<div class="panel-header">{PANEL_ICONS.get(panel,"")} {panel} Parameters</div>',
+                           unsafe_allow_html=True)
+                
+                param_cfgs = PANEL_PARAM_MAP.get(panel, [])
+                if param_cfgs:
+                    render_parameter_entry(panel, param_cfgs)
+                
+                st.markdown("---")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    render_add_custom_section(panel)
+                with col_b:
+                    render_delete_section(panel)
+                
+                render_current_params_table(panel)
+
+# ── TAB 3: Analysis ──────────────────────────────────────────
+with main_tabs[2]:
+    st.subheader("📊 Analysis Results")
+    
+    active = st.session_state.active_panels
+    if not active:
+        st.info("Select panels in the sidebar.")
+    else:
+        # Run all analyses button
+        if st.button("🔬 Run All Analyses", type="primary"):
+            for panel in active:
+                params = st.session_state.get(f'{panel}_params', {})
+                if params:
+                    with st.spinner(f"Analyzing {panel}..."):
+                        analyzer = PANEL_ANALYZER.get(panel)
+                        if analyzer:
+                            try:
+                                result = analyzer(params, sex)
+                                st.session_state[f'{panel}_analysis'] = result
+                            except Exception as e:
+                                st.error(f"Error analyzing {panel}: {e}")
+        
+        # Display results per panel
+        analysis_tabs = st.tabs([f"{PANEL_ICONS.get(p,'')} {p}" for p in active])
+        
+        for idx, panel in enumerate(active):
+            with analysis_tabs[idx]:
+                analysis = st.session_state.get(f'{panel}_analysis')
+                params = st.session_state.get(f'{panel}_params', {})
+                
+                if not params:
+                    st.info(f"No {panel} parameters entered yet.")
+                elif not analysis:
+                    st.info(f"Click 'Run All Analyses' or enter {panel} values first.")
+                else:
+                    render_analysis_results(panel, analysis)
+
+# ── TAB 4: AI Review ─────────────────────────────────────────
+with main_tabs[3]:
+    st.subheader("🤖 AI-Powered Clinical Review (Claude)")
+    
+    if not api_key:
+        st.warning("Enter your Claude API key in the sidebar.")
+    else:
+        review_panel = st.selectbox(
+            "Select panel for AI review",
+            ['All Active Panels'] + st.session_state.active_panels
+        )
+        
+        if st.button("🧠 Generate AI Review", type="primary"):
+            with st.spinner("Claude is analyzing..."):
+                if review_panel == 'All Active Panels':
+                    all_data = {}
+                    for p in st.session_state.active_panels:
+                        a = st.session_state.get(f'{p}_analysis')
+                        if a:
+                            all_data[p] = a
+                    if all_data:
+                        review = get_panel_ai_review(
+                            all_data, st.session_state.patient_info, api_key
                         )
                         st.session_state.ai_review_text = review
-
-                if st.session_state.ai_review_text:
-                    st.markdown("---")
-                    st.markdown(st.session_state.ai_review_text)
-            else:
-                if st.session_state.parameters:
-                    selected = st.selectbox("Select Parameter", list(st.session_state.parameters.keys()))
-                    if st.button("🔍 Review Parameter", key="ai_single"):
-                        param_data = st.session_state.parameters[selected]
-                        classification = classify_value(selected, param_data['value'], sex)
-                        with st.spinner(f"Analyzing {selected}…"):
-                            review = get_parameter_specific_ai_review(
-                                selected, param_data['value'],
-                                param_data.get('unit', ''),
-                                classification, api_key
-                            )
-                        st.markdown(review)
-
-    # ── Tab 6: Report ───────────────────────────────────────────────
-    with tab_report:
-        st.subheader("📄 Download / Share Report")
-
-        if not st.session_state.analysis_results:
-            st.info("Run the analysis first to generate a report.")
-        else:
-            include_ai = st.checkbox("Include AI Review in PDF", value=bool(st.session_state.ai_review_text))
-
-            if st.button("📥 Generate PDF Report", type="primary", key="gen_pdf"):
-                with st.spinner("Generating PDF…"):
-                    ai_text = st.session_state.ai_review_text if include_ai else None
-                    pdf_bytes = generate_pdf_report(
-                        st.session_state.analysis_results,
-                        st.session_state.patient_info,
-                        ai_text
-                    )
-                    st.download_button(
-                        "⬇️ Download PDF",
-                        data=pdf_bytes,
-                        file_name=f"blood_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                        mime="application/pdf"
-                    )
-
+                    else:
+                        st.warning("Run analyses first.")
+                else:
+                    a = st.session_state.get(f'{review_panel}_analysis')
+                    if a:
+                        review = get_panel_ai_review(
+                            {review_panel: a}, st.session_state.patient_info, api_key
+                        )
+                        st.session_state.ai_review_text = review
+                    else:
+                        st.warning(f"Run {review_panel} analysis first.")
+        
+        if st.session_state.ai_review_text:
             st.markdown("---")
-            st.markdown("#### 📝 Text Summary")
-            summary = generate_summary_text(
-                st.session_state.analysis_results,
-                st.session_state.patient_info
-            )
-            st.text_area("Summary", summary, height=400)
+            st.markdown(st.session_state.ai_review_text)
+
+# ── TAB 5: Report ────────────────────────────────────────────
+with main_tabs[4]:
+    st.subheader("📄 Download / Share Report")
+    
+    has_analysis = any(
+        st.session_state.get(f'{p}_analysis') is not None 
+        for p in st.session_state.active_panels
+    )
+    
+    if not has_analysis:
+        st.info("Run analyses first to generate a report.")
+    else:
+        include_ai = st.checkbox("Include AI Review", value=bool(st.session_state.ai_review_text))
+        
+        if st.button("📥 Generate PDF Report", type="primary"):
+            with st.spinner("Generating PDF..."):
+                all_analyses = {}
+                for p in st.session_state.active_panels:
+                    a = st.session_state.get(f'{p}_analysis')
+                    if a:
+                        all_analyses[p] = a
+                
+                ai_text = st.session_state.ai_review_text if include_ai else None
+                pdf_bytes = generate_multi_panel_pdf(
+                    all_analyses,
+                    st.session_state.patient_info,
+                    ai_text
+                )
+                st.download_button(
+                    "⬇️ Download PDF",
+                    data=pdf_bytes,
+                    file_name=f"lab_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf"
+                )
+        
+        # Text summary
+        st.markdown("---")
+        summary_parts = []
+        for p in st.session_state.active_panels:
+            a = st.session_state.get(f'{p}_analysis')
+            if a and a.get('parameters'):
+                summary_parts.append(f"\n{'='*50}\n{p} ANALYSIS\n{'='*50}")
+                for pname, pdata in a['parameters'].items():
+                    c = pdata.get('classification', {})
+                    summary_parts.append(
+                        f"  {pname}: {pdata.get('value','')} {pdata.get('unit','')} "
+                        f"[{c.get('status','').upper()}]"
+                    )
+        
+        if summary_parts:
+            summary_text = "\n".join(summary_parts)
+            st.text_area("Summary", summary_text, height=300)
             st.download_button(
-                "⬇️ Download Text Summary",
-                data=summary,
-                file_name=f"blood_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                "⬇️ Download Text",
+                data=summary_text,
+                file_name=f"lab_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                 mime="text/plain"
             )
-
-
-# ════════════════════════════════════════════════════════════════════
-#  LFT PANEL
-# ════════════════════════════════════════════════════════════════════
-
-def render_lft_entry_and_analysis():
-    """Shared LFT entry and analysis — used by both standalone and combined."""
-    st.subheader("🏥 Liver Function Test (LFT) Analyzer")
-
-    # Step 1: Demographics
-    with st.expander("👤 Step 1: Patient Demographics", expanded=True):
-        dc1, dc2, dc3 = st.columns(3)
-        with dc1:
-            lft_age = st.number_input("Age", 18, 120, value=max(18, int(st.session_state.patient_info.get('age', 40) or 40)), key="lft_age")
-        with dc2:
-            lft_sex = st.selectbox("Sex", ["male", "female"],
-                                   index=0 if st.session_state.patient_info.get('sex', 'Male') != 'Female' else 1,
-                                   key="lft_sex")
-        with dc3:
-            lft_reason = st.selectbox("Reason for Testing", [
-                "routine", "symptoms", "medication", "known_disease", "incidental"
-            ], key="lft_reason")
-
-    # Step 2: Clinical Assessment
-    with st.expander("🔍 Step 2: Clinical Assessment", expanded=True):
-        cc1, cc2 = st.columns(2)
-        with cc1:
-            shock = st.radio("Shock / hemodynamic instability?", ["no", "yes"], horizontal=True, key="lft_shock")
-            biliary = st.radio("Fever, chills, RUQ pain, prior biliary surgery?", ["no", "yes"], horizontal=True, key="lft_biliary")
-        with cc2:
-            acute_injury = st.radio("Severe acute liver injury (jaundice + AMS/coagulopathy)?", ["no", "yes"], horizontal=True, key="lft_acute")
-            hemolysis = st.radio("Suspected hemolytic anemia?", ["no", "yes"], horizontal=True, key="lft_hemolysis")
-
-    st.session_state.lft_clinical = {
-        'age': lft_age, 'sex': lft_sex, 'reason': lft_reason,
-        'shock': shock, 'biliary': biliary,
-        'acute_injury': acute_injury, 'hemolysis': hemolysis
-    }
-
-    # Step 3: Lab Values
-    with st.expander("🧪 Step 3: Laboratory Values", expanded=True):
-        st.markdown("##### Liver Biochemical Tests")
-        lb1, lb2, lb3 = st.columns(3)
-        with lb1:
-            alt = st.number_input("ALT (IU/L)", 0.0, 10000.0, value=st.session_state.lft_parameters.get('alt', 0.0), step=0.1, key="lft_alt")
-            ast = st.number_input("AST (IU/L)", 0.0, 10000.0, value=st.session_state.lft_parameters.get('ast', 0.0), step=0.1, key="lft_ast")
-        with lb2:
-            alp = st.number_input("Alkaline Phosphatase (IU/L)", 0.0, 5000.0, value=st.session_state.lft_parameters.get('alp', 0.0), step=0.1, key="lft_alp")
-            total_bili = st.number_input("Total Bilirubin (mg/dL)", 0.0, 50.0, value=st.session_state.lft_parameters.get('total_bili', 0.0), step=0.1, key="lft_tbili")
-        with lb3:
-            direct_bili = st.number_input("Direct Bilirubin (mg/dL)", 0.0, 30.0, value=st.session_state.lft_parameters.get('direct_bili', 0.0), step=0.1, key="lft_dbili")
-
-        st.markdown("##### Liver Function Tests")
-        lf1, lf2, lf3 = st.columns(3)
-        with lf1:
-            albumin = st.number_input("Albumin (g/dL)", 0.0, 6.0, value=st.session_state.lft_parameters.get('albumin', 0.0), step=0.1, key="lft_alb")
-        with lf2:
-            pt = st.number_input("PT (seconds)", 0.0, 100.0, value=st.session_state.lft_parameters.get('pt', 0.0), step=0.1, key="lft_pt")
-        with lf3:
-            inr = st.number_input("INR", 0.0, 20.0, value=st.session_state.lft_parameters.get('inr', 0.0), step=0.1, key="lft_inr")
-
-        st.markdown("##### Additional Tests (optional)")
-        at1, at2, at3 = st.columns(3)
-        with at1:
-            ggt = st.number_input("GGT (IU/L)", 0.0, 5000.0, step=0.1, key="lft_ggt")
-        with at2:
-            ldh = st.number_input("LDH (IU/L)", 0.0, 5000.0, step=0.1, key="lft_ldh")
-        with at3:
-            haptoglobin = st.number_input("Haptoglobin (mg/dL)", 0.0, 500.0, step=0.1, key="lft_hapto")
-
-    st.session_state.lft_parameters = {
-        'alt': alt, 'ast': ast, 'alp': alp,
-        'total_bili': total_bili, 'direct_bili': direct_bili,
-        'albumin': albumin, 'pt': pt, 'inr': inr,
-        'ggt': ggt if ggt > 0 else None,
-        'ldh': ldh if ldh > 0 else None,
-        'haptoglobin': haptoglobin if haptoglobin > 0 else None
-    }
-
-    # Analyze
-    if st.button("🔬 Analyze LFT", type="primary", key="run_lft"):
-        if alt <= 0 or alp <= 0 or total_bili <= 0:
-            st.error("Please enter at least ALT, ALP, and Total Bilirubin.")
-        else:
-            with st.spinner("Analyzing LFT…"):
-                st.session_state.lft_analysis_results = analyze_lft(
-                    st.session_state.lft_parameters,
-                    st.session_state.lft_clinical
-                )
-
-    # Display results
-    if st.session_state.lft_analysis_results:
-        display_lft_results(st.session_state.lft_analysis_results)
-
-
-def display_lft_results(results: Dict):
-    """Render the LFT analysis results."""
-
-    # Emergency alert
-    if results.get('emergency'):
-        st.markdown("""
-        <div class="critical-alert">
-            <h3>🚨 EMERGENCY PATHWAY ACTIVATED</h3>
-            <p>This patient has worrisome clinical findings requiring immediate intervention.
-            Do not delay life-saving treatments for diagnostic testing.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # Summary metrics
-    mc1, mc2, mc3, mc4 = st.columns(4)
-    with mc1:
-        st.metric("R Value", results.get('r_value', 'N/A'))
-    with mc2:
-        st.metric("Pattern", results.get('pattern', 'N/A').replace('_', ' ').title())
-    with mc3:
-        sev = results.get('severity', {})
-        st.metric("Severity", sev.get('grade', 'N/A').upper())
-    with mc4:
-        st.metric("AST/ALT Ratio", results.get('ast_alt_ratio', 'N/A'))
-
-    # Pattern badge
-    pattern = results.get('pattern', '')
-    pattern_colors = {
-        'hepatocellular': '🔴', 'cholestatic': '🔵',
-        'mixed': '🟡', 'isolated_hyperbilirubinemia': '🟣'
-    }
-    st.markdown(f"### {pattern_colors.get(pattern, '⚪')} Pattern: **{pattern.replace('_', ' ').upper()}**")
-
-    # Pathway
-    st.markdown("### 📍 Diagnostic Pathway")
-    pathway = results.get('pathway', '')
-    pathway_content = results.get('pathway_content', '')
-    if pathway_content:
-        st.markdown(f'<div class="step-box">{pathway_content}</div>', unsafe_allow_html=True)
-
-    # Step-by-step analysis
-    st.markdown("### 🔬 Step-by-Step Analysis")
-
-    # Step 1: R Value
-    with st.expander("Step 1: Pattern Recognition (R Value)", expanded=True):
-        r_calc = results.get('r_calculation', {})
-        st.markdown(f"""
-        **R = (ALT / ALT_ULN) / (ALP / ALP_ULN)**
-
-        R = ({r_calc.get('alt', '?')} / {r_calc.get('alt_uln', '?')}) / ({r_calc.get('alp', '?')} / {r_calc.get('alp_uln', '?')})
-
-        R = {r_calc.get('alt_ratio', '?')} / {r_calc.get('alp_ratio', '?')} = **{results.get('r_value', '?')}**
-
-        | R Value | Pattern |
-        |---------|---------|
-        | ≥ 5 | Hepatocellular |
-        | 2-5 | Mixed |
-        | ≤ 2 | Cholestatic |
-        """)
-
-    # Step 2: Severity
-    with st.expander("Step 2: Severity Assessment", expanded=True):
-        abnormalities = results.get('abnormalities', {})
-        severity_table = results.get('severity_table', [])
-        if severity_table:
-            df = pd.DataFrame(severity_table)
-            st.dataframe(df, use_container_width=True)
-        sev = results.get('severity', {})
-        st.info(f"**Severity Grade:** {sev.get('grade', '').upper()} — {sev.get('description', '')}")
-
-    # Step 3: Synthetic function
-    with st.expander("Step 3: Synthetic Function Assessment", expanded=True):
-        synth = results.get('synthetic_function', {})
-        for k, v in synth.items():
-            st.markdown(f"- **{k}**: {v}")
-        if results.get('synthetic_impaired'):
-            st.error("⚠️ Abnormal synthetic function suggests significant hepatic impairment.")
-
-    # Step 4: AST/ALT Ratio
-    with st.expander("Step 4: AST/ALT Ratio", expanded=True):
-        st.markdown(f"**Ratio:** {results.get('ast_alt_ratio', 'N/A')}")
-        st.markdown(f"**Interpretation:** {results.get('ast_alt_interpretation', '')}")
-
-    # Differential Diagnosis
-    st.markdown("### 🩺 Differential Diagnosis")
-    differentials = results.get('differentials', [])
-    for i, d in enumerate(differentials, 1):
-        st.markdown(
-            f'<div class="diagnosis-card">'
-            f'<strong>{i}. {d["condition"]}</strong><br>{d["discussion"]}</div>',
-            unsafe_allow_html=True
-        )
-
-    # Recommendations
-    st.markdown("### 📋 Clinical Recommendations")
-    recommendations = results.get('recommendations', [])
-    for i, rec in enumerate(recommendations, 1):
-        st.markdown(
-            f'<div class="step-box"><strong>{i}. {rec["title"]}</strong><br>{rec["description"]}</div>',
-            unsafe_allow_html=True
-        )
-
-    # Educational content
-    with st.expander("📚 Educational Summary", expanded=False):
-        edu = results.get('educational_content', '')
-        st.markdown(edu)
-
-
-def render_lft_standalone_panel():
-    """Render the standalone LFT panel with tabs."""
-    tab_entry, tab_ai_lft, tab_report_lft = st.tabs([
-        "🧪 LFT Entry & Analysis", "🤖 AI Review", "📄 Report"
-    ])
-
-    with tab_entry:
-        render_lft_entry_and_analysis()
-
-    with tab_ai_lft:
-        st.subheader("🤖 AI Review of LFT Findings")
-        if not api_key:
-            st.warning("Please enter your Claude API key in the sidebar.")
-        elif not st.session_state.lft_analysis_results:
-            st.info("Run the LFT analysis first.")
-        else:
-            if st.button("🧠 Generate LFT AI Review", type="primary", key="ai_lft"):
-                with st.spinner("Claude is reviewing LFT findings…"):
-                    from utils.ai_review import get_lft_ai_review
-                    review = get_lft_ai_review(
-                        st.session_state.lft_parameters,
-                        st.session_state.lft_analysis_results,
-                        st.session_state.lft_clinical,
-                        api_key
-                    )
-                    st.session_state.ai_review_text = review
-            if st.session_state.ai_review_text:
-                st.markdown(st.session_state.ai_review_text)
-
-    with tab_report_lft:
-        st.subheader("📄 LFT Report")
-        if st.session_state.lft_analysis_results:
-            summary = json.dumps(st.session_state.lft_analysis_results, indent=2, default=str)
-            st.text_area("LFT Analysis JSON", summary, height=300)
-            st.download_button(
-                "⬇️ Download LFT Summary",
-                data=summary,
-                file_name=f"lft_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json"
-            )
-        else:
-            st.info("Run the analysis first.")
-
-
-# ════════════════════════════════════════════════════════════════════
-#  MAIN ROUTING
-# ════════════════════════════════════════════════════════════════════
-
-if st.session_state.active_panel == 'CBC':
-    render_cbc_panel()
-elif st.session_state.active_panel == 'LFT':
-    render_lft_standalone_panel()
-else:  # Combined
-    render_cbc_panel()
