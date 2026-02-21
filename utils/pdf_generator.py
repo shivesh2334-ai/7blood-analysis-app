@@ -7,7 +7,115 @@ from datetime import datetime
 from typing import Dict, Optional
 from fpdf import FPDF
 
+# Add this function to existing pdf_generator.py
 
+def generate_multi_panel_pdf(all_analyses: Dict, patient_info: Dict,
+                             ai_review: Optional[str] = None) -> bytes:
+    """Generate PDF covering multiple panels."""
+    pdf = HematologyReport()
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    _clean = HematologyReport._clean
+
+    # Patient info
+    if patient_info:
+        pdf.section_title('PATIENT INFORMATION')
+        pdf.set_font('Helvetica', '', 10)
+        for k, v in patient_info.items():
+            pdf.cell(40, 6, f'{k.capitalize()}:', 0, 0)
+            pdf.set_font('Helvetica', 'B', 10)
+            pdf.cell(0, 6, _clean(str(v)), 0, 1)
+            pdf.set_font('Helvetica', '', 10)
+        pdf.ln(3)
+
+    # Each panel
+    for panel_name, analysis in all_analyses.items():
+        pdf.add_page()
+        pdf.section_title(f'{panel_name} ANALYSIS')
+        
+        # Summary
+        pdf.set_font('Helvetica', '', 10)
+        pdf.cell(50, 6, 'Parameters:', 0, 0)
+        pdf.cell(0, 6, str(analysis.get('total_parameters', 0)), 0, 1)
+        pdf.cell(50, 6, 'Abnormal:', 0, 0)
+        pdf.cell(0, 6, str(analysis.get('abnormal_count', 0)), 0, 1)
+        pdf.cell(50, 6, 'Critical:', 0, 0)
+        pdf.cell(0, 6, str(analysis.get('critical_count', 0)), 0, 1)
+        pdf.ln(3)
+
+        # Parameters table
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_fill_color(41, 128, 185)
+        pdf.set_text_color(255, 255, 255)
+        for h, w in zip(['Parameter', 'Value', 'Unit', 'Status'], [50, 30, 30, 80]):
+            pdf.cell(w, 7, h, 1, 0, 'C', fill=True)
+        pdf.ln()
+        pdf.set_text_color(0, 0, 0)
+
+        for pname, pdata in analysis.get('parameters', {}).items():
+            c = pdata.get('classification', {})
+            status = c.get('status', 'unknown')
+            if 'critical' in status:
+                pdf.set_fill_color(255, 200, 200)
+            elif status in ('low', 'high', 'abnormal'):
+                pdf.set_fill_color(255, 235, 200)
+            else:
+                pdf.set_fill_color(200, 255, 200)
+
+            pdf.set_font('Helvetica', '', 8)
+            pdf.cell(50, 6, _clean(str(pname)[:30]), 1, 0, 'L', fill=True)
+            pdf.cell(30, 6, _clean(str(pdata.get('value', ''))), 1, 0, 'C', fill=True)
+            pdf.cell(30, 6, _clean(str(pdata.get('unit', ''))), 1, 0, 'C', fill=True)
+            pdf.cell(80, 6, _clean(str(c.get('message', '')[:45])), 1, 0, 'L', fill=True)
+            pdf.ln()
+
+        # Calculated indices
+        if analysis.get('calculated_indices'):
+            pdf.ln(3)
+            pdf.sub_section_title('Calculated Indices')
+            for iname, idata in analysis['calculated_indices'].items():
+                pdf.set_font('Helvetica', 'B', 9)
+                pdf.cell(60, 5, _clean(f'{iname}: {idata.get("value","")}'), 0, 0)
+                pdf.set_font('Helvetica', '', 8)
+                pdf.cell(0, 5, _clean(str(idata.get('interpretation', ''))[:80]), 0, 1)
+
+        # Pattern
+        if analysis.get('pattern_summary'):
+            pdf.ln(2)
+            pdf.sub_section_title('Pattern Summary')
+            pdf.set_font('Helvetica', '', 9)
+            pdf.multi_cell(0, 5, _clean(analysis['pattern_summary'][:500]))
+
+    # AI Review
+    if ai_review:
+        pdf.add_page()
+        pdf.section_title('AI-POWERED CLINICAL REVIEW')
+        pdf.set_font('Helvetica', '', 9)
+        for para in ai_review.split('\n'):
+            para = para.strip()
+            if not para:
+                pdf.ln(2)
+                continue
+            if para.startswith('**') or para.startswith('#'):
+                pdf.set_font('Helvetica', 'B', 10)
+                pdf.multi_cell(0, 5, _clean(para.replace('**', '').replace('#', '').strip()))
+                pdf.set_font('Helvetica', '', 9)
+            else:
+                pdf.multi_cell(0, 4, _clean(para))
+            pdf.ln(1)
+
+    # Disclaimer
+    pdf.add_page()
+    pdf.section_title('DISCLAIMER')
+    pdf.set_font('Helvetica', '', 10)
+    pdf.multi_cell(0, 6, _clean(
+        'This report is generated for educational and learning purposes only. '
+        'It is NOT intended for clinical decision-making. Always consult qualified medical professionals.'
+    ))
+
+    output = io.BytesIO()
+    pdf.output(output)
+    return output.getvalue()
 class HematologyReport(FPDF):
     """Custom PDF class for hematology reports."""
 
