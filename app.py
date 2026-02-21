@@ -259,13 +259,12 @@ def render_parameter_entry(panel_name: str, param_configs: List[Dict]):
                     if val:
                         params[key] = {'value': val, 'unit': unit}
                 else:
-                    val = st.number_input(
-                        f"{label} ({unit})" if unit else label,
-                        min_value=float(mn), max_value=float(mx),
-                        value=float(current) if current else 0.0,
-                        step=float(step),
-                        key=f"entry_{panel_name}_{key}"
+                    val = safe_number_input(
+                       f"{label} ({unit})" if unit else label,
+                       min_value=..., max_value=max_val, value=prefilled_value,
+                       step=step, key=f"entry_{panel_name}_{key}"
                     )
+                        
                     if val > 0:
                         params[key] = {'value': val, 'unit': unit}
     
