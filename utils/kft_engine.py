@@ -287,4 +287,25 @@ def analyze_kft(parameters: Dict, sex: str = 'Default') -> Dict:
 
 **1. Creatinine vs GFR**: Creatinine is a late marker — GFR must drop ~50% before creatinine rises. eGFR is more sensitive for early CKD detection.
 
-**2. BUN/Creatinine Ratio**: This simple ratio differentiates prerenal (>20:1) from intrinsic renal disease (~10-15:1) and identi
+**2. BUN/Creatinine Ratio**: This simple ratio differentiates prerenal (>20:1) from intrinsic renal disease (~10-15:1) and identifies GI bleeding as a cause of elevated BUN.
+
+**3. Electrolyte Interpretation**: Always assess volume status when interpreting sodium. Always rule out pseudohyperkalemia (hemolysis) before treating hyperkalemia. Always check magnesium when potassium or calcium won't correct.
+
+**4. Anion Gap**: AG = Na - (Cl + HCO3). Elevated AG metabolic acidosis (MUDPILES) vs normal AG (hyperchloremic) has completely different differential diagnoses.
+
+**5. Corrected Calcium**: Total calcium is 40% protein-bound. Hypoalbuminemia falsely lowers total calcium. Use corrected calcium or measure ionized calcium directly.
+"""
+
+    return {
+        'parameters': results,
+        'abnormalities': abnormalities,
+        'critical_values': critical_values,
+        'quality_checks': quality_checks,
+        'calculated_indices': calc_indices,
+        'total_parameters': len(results),
+        'abnormal_count': len(abnormalities),
+        'critical_count': len(critical_values),
+        'pattern_summary': pattern_summary,
+        'educational_content': edu,
+        'recommendations': []
+    }
