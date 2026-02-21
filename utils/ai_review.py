@@ -7,7 +7,58 @@ import os
 from typing import Dict, Optional
 import anthropic
 
+# Add this function to the existing ai_review.py
 
+def get_panel_ai_review(all_analyses: Dict, patient_info: Dict, api_key: str) -> Optional[str]:
+    """Get AI review across multiple panels."""
+    if not api_key:
+        return "Error: Claude API key not provided."
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        parts = ["Provide a comprehensive clinical review of the following multi-panel laboratory results.\n"]
+        
+        if patient_info:
+            parts.append("PATIENT INFO:")
+            for k, v in patient_info.items():
+                parts.append(f"  {k}: {v}")
+            parts.append("")
+        
+        for panel_name, analysis in all_analyses.items():
+            parts.append(f"\n{'='*40}\n{panel_name} RESULTS:\n{'='*40}")
+            for pname, pdata in analysis.get('parameters', {}).items():
+                c = pdata.get('classification', {})
+                parts.append(f"  {pname}: {pdata.get('value','')} {pdata.get('unit','')} [{c.get('status','').upper()}]")
+            if analysis.get('calculated_indices'):
+                parts.append("  Calculated Indices:")
+                for iname, idata in analysis['calculated_indices'].items():
+                    parts.append(f"    {iname}: {idata.get('value','')} — {idata.get('interpretation','')}")
+            if analysis.get('pattern_summary'):
+                parts.append(f"  Pattern: {analysis['pattern_summary'][:200]}")
+
+        parts.append("""
+Provide comprehensive analysis covering:
+1. OVERALL CLINICAL IMPRESSION across all panels
+2. CROSS-PANEL CORRELATIONS (how findings in one panel relate to another)
+3. INTEGRATED DIFFERENTIAL DIAGNOSIS
+4. PATTERN RECOGNITION across organ systems
+5. PRIORITY FINDINGS requiring immediate attention
+6. RECOMMENDED ADDITIONAL INVESTIGATIONS
+7. CLINICAL CORRELATION POINTS
+8. MONITORING PLAN
+
+Include educational pearls and disclaimer.""")
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": "\n".join(parts)}],
+            system="You are an expert clinical pathologist reviewing multi-panel laboratory results. "
+                   "Provide integrated analysis emphasizing cross-panel correlations and pattern recognition. "
+                   "Include educational content. Disclaimer for educational purposes."
+        )
+        return message.content[0].text
+    except Exception as e:
+        return f"Error: {str(e)}"
 def get_ai_review(parameters: Dict, analysis: Dict, patient_info: Dict, api_key: str) -> Optional[str]:
     """Get comprehensive AI review of CBC findings using Claude."""
     if not api_key:
