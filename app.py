@@ -14,6 +14,7 @@ import json
 import io
 import os
 from typing import Dict, List, Optional
+from PIL import Image
 
 from utils.ocr_parser import process_uploaded_file, PARAMETER_PATTERNS
 from utils.analysis_engine import (
@@ -163,7 +164,8 @@ st.markdown("""
 # ═══════════════════════════════════════════════════════════
 
 def render_status_badge(status: str) -> str:
-    if 'critical' in str(status):
+    """Render colored status badge based on classification."""
+    if 'critical' in str(status).lower():
         return '<span class="critical-badge">⚠️ CRITICAL</span>'
     elif status in ('low', 'high', 'abnormal'):
         icon = '⬆' if status == 'high' else '⬇' if status == 'low' else '⚡'
@@ -174,101 +176,148 @@ def render_status_badge(status: str) -> str:
 
 
 def create_gauge_chart(value, low, high, title, unit):
-    span = high - low if high != low else 1
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=value,
-        title={'text': f"{title} ({unit})", 'font': {'size': 13}},
-        number={'font': {'size': 18}},
-        gauge={
-            'axis': {'range': [low - span, high + span]},
-            'bar': {'color': "#667eea"},
-            'steps': [
-                {'range': [low - span, low], 'color': '#fee'},
-                {'range': [low, high], 'color': '#d4edda'},
-                {'range': [high, high + span], 'color': '#fff3cd'},
-            ],
-            'threshold': {'line': {'color': "red", 'width': 2}, 'thickness': 0.75, 'value': value}
-        }
-    ))
-    fig.update_layout(height=180, margin=dict(l=15, r=15, t=35, b=15))
-    return fig
+    """Create a gauge chart for parameter visualization."""
+    try:
+        span = high - low if high != low else 1
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=value,
+            title={'text': f"{title} ({unit})", 'font': {'size': 13}},
+            number={'font': {'size': 18}},
+            gauge={
+                'axis': {'range': [low - span, high + span]},
+                'bar': {'color': "#667eea"},
+                'steps': [
+                    {'range': [low - span, low], 'color': '#fee'},
+                    {'range': [low, high], 'color': '#d4edda'},
+                    {'range': [high, high + span], 'color': '#fff3cd'},
+                ],
+                'threshold': {'line': {'color': "red", 'width': 2}, 'thickness': 0.75, 'value': value}
+            }
+        ))
+        fig.update_layout(height=180, margin=dict(l=15, r=15, t=35, b=15))
+        return fig
+    except Exception as e:
+        st.error(f"Error creating gauge chart: {e}")
+        return None
 
 
 def create_panel_deviation_chart(analysis_results: Dict) -> go.Figure:
-    params = analysis_results.get('parameters', {})
-    names, devs, colors = [], [], []
-    for name, data in params.items():
-        c = data.get('classification', {})
-        low, high, val = c.get('low'), c.get('high'), data.get('value')
-        if low is None or high is None or val is None:
-            continue
-        mid = (low + high) / 2
-        span = (high - low) / 2
-        if span == 0:
-            continue
-        dev = ((val - mid) / span) * 100
-        status = c.get('status', 'normal')
-        color = '#e74c3c' if 'critical' in str(status) else '#f39c12' if status in ('low', 'high') else '#27ae60'
-        names.append(name)
-        devs.append(dev)
-        colors.append(color)
+    """Create deviation chart showing parameter deviation from normal range."""
+    try:
+        params = analysis_results.get('parameters', {})
+        names, devs, colors = [], [], []
+        
+        for name, data in params.items():
+            c = data.get('classification', {})
+            low, high, val = c.get('low'), c.get('high'), data.get('value')
+            
+            if low is None or high is None or val is None:
+                continue
+            
+            mid = (low + high) / 2
+            span = (high - low) / 2
+            
+            if span == 0:
+                continue
+            
+            dev = ((val - mid) / span) * 100
+            status = c.get('status', 'normal')
+            color = '#e74c3c' if 'critical' in str(status).lower() else '#f39c12' if status in ('low', 'high') else '#27ae60'
+            
+            names.append(name)
+            devs.append(dev)
+            colors.append(color)
 
-    fig = go.Figure(go.Bar(
-        x=devs, y=names, orientation='h', marker_color=colors,
-        text=[f"{d:+.0f}%" for d in devs], textposition='outside'
-    ))
-    fig.add_vrect(x0=-100, x1=100, fillcolor="green", opacity=0.05, line_width=0)
-    fig.add_vline(x=0, line_dash="dash", line_color="gray")
-    fig.update_layout(
-        title="Parameter Deviation from Normal",
-        xaxis_title="% Deviation", yaxis_title="",
-        height=max(250, len(names) * 30),
-        margin=dict(l=140, r=40, t=40, b=30)
-    )
-    return fig
+        fig = go.Figure(go.Bar(
+            x=devs, y=names, orientation='h', marker_color=colors,
+            text=[f"{d:+.0f}%" for d in devs], textposition='outside'
+        ))
+        fig.add_vrect(x0=-100, x1=100, fillcolor="green", opacity=0.05, line_width=0)
+        fig.add_vline(x=0, line_dash="dash", line_color="gray")
+        fig.update_layout(
+            title="Parameter Deviation from Normal",
+            xaxis_title="% Deviation", yaxis_title="",
+            height=max(250, len(names) * 30),
+            margin=dict(l=140, r=40, t=40, b=30)
+        )
+        return fig
+    except Exception as e:
+        st.error(f"Error creating deviation chart: {e}")
+        return None
+
+
+def safe_number_input(label: str, value: float = 0.0, min_value: float = None, 
+                      max_value: float = None, step: float = 0.1, key: str = None) -> float:
+    """Safely handle number input with error handling."""
+    try:
+        return st.number_input(
+            label,
+            value=float(value) if value else 0.0,
+            min_value=min_value,
+            max_value=max_value,
+            step=step,
+            key=key
+        )
+    except Exception as e:
+        st.warning(f"Error in {label}: {e}")
+        return 0.0
 
 
 def render_parameter_entry(panel_name: str, param_configs: List[Dict]):
     """Generic parameter entry widget for any panel."""
-    params = st.session_state.get(f'{panel_name}_params', {})
-    
-    # Group into rows of 3-4
-    cols_per_row = 3
-    for i in range(0, len(param_configs), cols_per_row):
-        batch = param_configs[i:i + cols_per_row]
-        cols = st.columns(len(batch))
-        for j, cfg in enumerate(batch):
-            with cols[j]:
-                key = cfg['key']
-                label = cfg.get('label', key)
-                unit = cfg.get('unit', '')
-                mn = cfg.get('min', 0.0)
-                mx = cfg.get('max', 10000.0)
-                step = cfg.get('step', 0.1)
-                is_text = cfg.get('text', False)
-                
-                current = params.get(key, {}).get('value', 0.0 if not is_text else '')
-                
-                if is_text:
-                    val = st.text_input(
-                        f"{label} ({unit})" if unit else label,
-                        value=str(current) if current else '',
-                        key=f"entry_{panel_name}_{key}"
-                    )
-                    if val:
-                        params[key] = {'value': val, 'unit': unit}
-                else:
-                    val = safe_number_input(
-                       f"{label} ({unit})" if unit else label,
-                       min_value=..., max_value=max_val, value=prefilled_value,
-                       step=step, key=f"entry_{panel_name}_{key}"
-                    )
+    try:
+        params = st.session_state.get(f'{panel_name}_params', {})
+        
+        # Group into rows of 3
+        cols_per_row = 3
+        for i in range(0, len(param_configs), cols_per_row):
+            batch = param_configs[i:i + cols_per_row]
+            cols = st.columns(len(batch))
+            
+            for j, cfg in enumerate(batch):
+                with cols[j]:
+                    key = cfg.get('key')
+                    label = cfg.get('label', key)
+                    unit = cfg.get('unit', '')
+                    min_val = cfg.get('min', 0.0)
+                    max_val = cfg.get('max', 10000.0)
+                    step = cfg.get('step', 0.1)
+                    is_text = cfg.get('text', False)
+                    
+                    current = params.get(key, {})
+                    current_value = current.get('value', 0.0 if not is_text else '')
+                    
+                    display_label = f"{label} ({unit})" if unit else label
+                    
+                    if is_text:
+                        val = st.text_input(
+                            display_label,
+                            value=str(current_value) if current_value else '',
+                            key=f"entry_{panel_name}_{key}"
+                        )
+                        if val:
+                            params[key] = {'value': val, 'unit': unit}
+                        elif key in params:
+                            del params[key]
+                    else:
+                        val = safe_number_input(
+                            display_label,
+                            value=float(current_value) if current_value else 0.0,
+                            min_value=min_val,
+                            max_value=max_val,
+                            step=step,
+                            key=f"entry_{panel_name}_{key}"
+                        )
                         
-                    if val > 0:
-                        params[key] = {'value': val, 'unit': unit}
-    
-    st.session_state[f'{panel_name}_params'] = params
+                        if val > 0:
+                            params[key] = {'value': val, 'unit': unit}
+                        elif key in params:
+                            del params[key]
+        
+        st.session_state[f'{panel_name}_params'] = params
+    except Exception as e:
+        st.error(f"Error in parameter entry for {panel_name}: {e}")
 
 
 def render_analysis_results(panel_name: str, analysis: Dict):
@@ -277,166 +326,189 @@ def render_analysis_results(panel_name: str, analysis: Dict):
         st.info("Run the analysis to see results.")
         return
     
-    # Summary metrics
-    cols = st.columns(4)
-    with cols[0]:
-        st.metric("Total Parameters", analysis.get('total_parameters', 0))
-    with cols[1]:
-        st.metric("Abnormal", analysis.get('abnormal_count', 0),
-                  delta=f"{analysis.get('abnormal_count',0)} abnormal" if analysis.get('abnormal_count',0) > 0 else None,
-                  delta_color="inverse")
-    with cols[2]:
-        st.metric("Critical", analysis.get('critical_count', 0),
-                  delta="⚠️ ALERT" if analysis.get('critical_count',0) > 0 else None,
-                  delta_color="inverse")
-    with cols[3]:
-        normal = analysis.get('total_parameters', 0) - analysis.get('abnormal_count', 0)
-        st.metric("Normal", normal)
-    
-    # Critical alerts
-    if analysis.get('critical_values'):
-        st.error("🚨 **CRITICAL VALUES DETECTED**")
-        for cv in analysis['critical_values']:
-            st.markdown(f"**{cv['parameter']}**: {cv.get('message', cv.get('value', ''))}")
-    
-    # Quality checks
-    if analysis.get('quality_checks'):
-        with st.expander("🔍 Quality Assessment", expanded=True):
-            for check in analysis['quality_checks']:
-                sev = check.get('severity', 'info')
-                icon = {'pass':'✅','info':'ℹ️','warning':'⚠️','error':'❌'}.get(sev,'❓')
-                css = f"quality-{sev}"
-                st.markdown(
-                    f'<div class="diagnosis-card {css}"><strong>{icon} {check.get("rule","")}</strong><br>'
-                    f'{check.get("interpretation","")}</div>', unsafe_allow_html=True
-                )
-    
-    # Deviation chart
-    if analysis.get('parameters'):
-        fig = create_panel_deviation_chart(analysis)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Detailed parameters
-    with st.expander("📋 Detailed Parameter Analysis", expanded=True):
-        for pname, pdata in analysis.get('parameters', {}).items():
-            c = pdata.get('classification', {})
-            status = c.get('status', 'unknown')
-            badge = render_status_badge(status)
-            st.markdown(f"### {pname} {badge}", unsafe_allow_html=True)
-            
-            c1, c2 = st.columns([2, 3])
-            with c1:
-                low, high = c.get('low'), c.get('high')
-                if low is not None and high is not None and isinstance(pdata.get('value'), (int, float)):
-                    fig = create_gauge_chart(pdata['value'], low, high, pname, pdata.get('unit',''))
-                    st.plotly_chart(fig, use_container_width=True)
-            with c2:
-                st.markdown(f"**Value:** {pdata.get('value','')} {pdata.get('unit','')}")
-                st.markdown(f"**Status:** {c.get('message','')}")
-                
-                diff = pdata.get('differential')
-                if diff:
-                    st.markdown(f"**{diff.get('title','')}**")
-                    for k, d in enumerate(diff.get('differentials',[]), 1):
-                        st.markdown(
-                            f'<div class="diagnosis-card"><strong>{k}. {d["condition"]}</strong><br>'
-                            f'{d["discussion"]}</div>', unsafe_allow_html=True
-                        )
-                
-                # Learning content
-                learning = pdata.get('learning')
-                if learning:
+    try:
+        # Summary metrics
+        cols = st.columns(4)
+        with cols[0]:
+            st.metric("Total Parameters", analysis.get('total_parameters', 0))
+        with cols[1]:
+            abnormal_count = analysis.get('abnormal_count', 0)
+            st.metric("Abnormal", abnormal_count,
+                      delta=f"{abnormal_count} abnormal" if abnormal_count > 0 else None,
+                      delta_color="inverse")
+        with cols[2]:
+            critical_count = analysis.get('critical_count', 0)
+            st.metric("Critical", critical_count,
+                      delta="⚠️ ALERT" if critical_count > 0 else None,
+                      delta_color="inverse")
+        with cols[3]:
+            normal = analysis.get('total_parameters', 0) - analysis.get('abnormal_count', 0)
+            st.metric("Normal", normal)
+        
+        # Critical alerts
+        if analysis.get('critical_values'):
+            st.error("🚨 **CRITICAL VALUES DETECTED**")
+            for cv in analysis.get('critical_values', []):
+                message = cv.get('message', cv.get('value', ''))
+                st.markdown(f"**{cv.get('parameter', 'Unknown')}**: {message}")
+        
+        # Quality checks
+        if analysis.get('quality_checks'):
+            with st.expander("🔍 Quality Assessment", expanded=True):
+                for check in analysis.get('quality_checks', []):
+                    sev = check.get('severity', 'info')
+                    icon = {'pass': '✅', 'info': 'ℹ️', 'warning': '⚠️', 'error': '❌'}.get(sev, '❓')
+                    css = f"quality-{sev}"
                     st.markdown(
-                        f'<div class="learning-card">📚 <strong>Learning Point:</strong> {learning}</div>',
-                        unsafe_allow_html=True
+                        f'<div class="diagnosis-card {css}"><strong>{icon} {check.get("rule", "")}</strong><br>'
+                        f'{check.get("interpretation", "")}</div>', unsafe_allow_html=True
                     )
-            st.divider()
+        
+        # Deviation chart
+        if analysis.get('parameters'):
+            fig = create_panel_deviation_chart(analysis)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+        
+        # Detailed parameters
+        with st.expander("📋 Detailed Parameter Analysis", expanded=True):
+            for pname, pdata in analysis.get('parameters', {}).items():
+                c = pdata.get('classification', {})
+                status = c.get('status', 'unknown')
+                badge = render_status_badge(status)
+                st.markdown(f"### {pname} {badge}", unsafe_allow_html=True)
+                
+                c1, c2 = st.columns([2, 3])
+                with c1:
+                    low, high = c.get('low'), c.get('high')
+                    if low is not None and high is not None and isinstance(pdata.get('value'), (int, float)):
+                        fig = create_gauge_chart(pdata['value'], low, high, pname, pdata.get('unit', ''))
+                        if fig:
+                            st.plotly_chart(fig, use_container_width=True)
+                
+                with c2:
+                    st.markdown(f"**Value:** {pdata.get('value', '')} {pdata.get('unit', '')}")
+                    st.markdown(f"**Status:** {c.get('message', '')}")
+                    
+                    diff = pdata.get('differential')
+                    if diff:
+                        st.markdown(f"**{diff.get('title', '')}**")
+                        for k, d in enumerate(diff.get('differentials', []), 1):
+                            st.markdown(
+                                f'<div class="diagnosis-card"><strong>{k}. {d.get("condition", "")}</strong><br>'
+                                f'{d.get("discussion", "")}</div>', unsafe_allow_html=True
+                            )
+                    
+                    # Learning content
+                    learning = pdata.get('learning')
+                    if learning:
+                        st.markdown(
+                            f'<div class="learning-card">📚 <strong>Learning Point:</strong> {learning}</div>',
+                            unsafe_allow_html=True
+                        )
+                st.divider()
+        
+        # Calculated indices
+        if analysis.get('calculated_indices'):
+            with st.expander("🧮 Calculated Indices", expanded=False):
+                for idx_name, idx_data in analysis.get('calculated_indices', {}).items():
+                    st.markdown(
+                        f'<div class="diagnosis-card"><strong>{idx_name}: {idx_data.get("value", "")}</strong><br>'
+                        f'Formula: {idx_data.get("formula", "")}<br>'
+                        f'Interpretation: {idx_data.get("interpretation", "")}<br>'
+                        f'<em>{idx_data.get("note", "")}</em></div>', unsafe_allow_html=True
+                    )
+        
+        # Overall pattern / summary
+        if analysis.get('pattern_summary'):
+            with st.expander("🔬 Pattern Recognition & Summary", expanded=True):
+                st.markdown(analysis['pattern_summary'])
+        
+        # Recommendations
+        if analysis.get('recommendations'):
+            with st.expander("📋 Recommendations", expanded=False):
+                for i, rec in enumerate(analysis.get('recommendations', []), 1):
+                    st.markdown(
+                        f'<div class="step-box"><strong>{i}. {rec.get("title", "")}</strong><br>'
+                        f'{rec.get("description", "")}</div>', unsafe_allow_html=True
+                    )
+        
+        # Educational content
+        if analysis.get('educational_content'):
+            with st.expander("📚 Educational Summary & Learning Points", expanded=False):
+                st.markdown(analysis['educational_content'])
     
-    # Calculated indices
-    if analysis.get('calculated_indices'):
-        with st.expander("🧮 Calculated Indices", expanded=False):
-            for idx_name, idx_data in analysis['calculated_indices'].items():
-                st.markdown(
-                    f'<div class="diagnosis-card"><strong>{idx_name}: {idx_data.get("value","")}</strong><br>'
-                    f'Formula: {idx_data.get("formula","")}<br>'
-                    f'Interpretation: {idx_data.get("interpretation","")}<br>'
-                    f'<em>{idx_data.get("note","")}</em></div>', unsafe_allow_html=True
-                )
-    
-    # Overall pattern / summary
-    if analysis.get('pattern_summary'):
-        with st.expander("🔬 Pattern Recognition & Summary", expanded=True):
-            st.markdown(analysis['pattern_summary'])
-    
-    # Recommendations
-    if analysis.get('recommendations'):
-        with st.expander("📋 Recommendations", expanded=False):
-            for i, rec in enumerate(analysis['recommendations'], 1):
-                st.markdown(
-                    f'<div class="step-box"><strong>{i}. {rec.get("title","")}</strong><br>'
-                    f'{rec.get("description","")}</div>', unsafe_allow_html=True
-                )
-    
-    # Educational content
-    if analysis.get('educational_content'):
-        with st.expander("📚 Educational Summary & Learning Points", expanded=False):
-            st.markdown(analysis['educational_content'])
+    except Exception as e:
+        st.error(f"Error rendering analysis results: {e}")
 
 
 def render_delete_section(panel_name: str):
     """Generic parameter deletion section."""
-    params = st.session_state.get(f'{panel_name}_params', {})
-    if params:
-        st.markdown("#### 🗑️ Remove Parameters")
-        to_delete = st.multiselect(
-            "Select parameters to remove",
-            options=list(params.keys()),
-            key=f"del_{panel_name}"
-        )
-        if st.button(f"🗑️ Remove Selected", key=f"delbtn_{panel_name}"):
-            for p in to_delete:
-                del st.session_state[f'{panel_name}_params'][p]
-            st.rerun()
+    try:
+        params = st.session_state.get(f'{panel_name}_params', {})
+        if params:
+            st.markdown("#### 🗑️ Remove Parameters")
+            to_delete = st.multiselect(
+                "Select parameters to remove",
+                options=list(params.keys()),
+                key=f"del_{panel_name}"
+            )
+            if st.button(f"🗑️ Remove Selected", key=f"delbtn_{panel_name}"):
+                for p in to_delete:
+                    if p in st.session_state[f'{panel_name}_params']:
+                        del st.session_state[f'{panel_name}_params'][p]
+                st.rerun()
+    except Exception as e:
+        st.error(f"Error in delete section: {e}")
 
 
 def render_add_custom_section(panel_name: str):
     """Allow adding custom parameters not in the predefined list."""
-    st.markdown("#### ➕ Add Custom Parameter")
-    ac1, ac2, ac3, ac4 = st.columns([3, 2, 2, 1])
-    with ac1:
-        custom_name = st.text_input("Parameter Name", key=f"custom_name_{panel_name}")
-    with ac2:
-        custom_value = st.text_input("Value", key=f"custom_val_{panel_name}")
-    with ac3:
-        custom_unit = st.text_input("Unit", key=f"custom_unit_{panel_name}")
-    with ac4:
-        st.write("")
-        st.write("")
-        if st.button("➕ Add", key=f"custom_add_{panel_name}"):
-            if custom_name and custom_value:
-                try:
-                    val = float(custom_value)
-                except ValueError:
-                    val = custom_value
-                st.session_state[f'{panel_name}_params'][custom_name] = {
-                    'value': val, 'unit': custom_unit
-                }
-                st.rerun()
+    try:
+        st.markdown("#### ➕ Add Custom Parameter")
+        ac1, ac2, ac3, ac4 = st.columns([3, 2, 2, 1])
+        
+        with ac1:
+            custom_name = st.text_input("Parameter Name", key=f"custom_name_{panel_name}")
+        with ac2:
+            custom_value = st.text_input("Value", key=f"custom_val_{panel_name}")
+        with ac3:
+            custom_unit = st.text_input("Unit", key=f"custom_unit_{panel_name}")
+        with ac4:
+            st.write("")
+            st.write("")
+            if st.button("➕ Add", key=f"custom_add_{panel_name}"):
+                if custom_name and custom_value:
+                    try:
+                        val = float(custom_value)
+                    except (ValueError, TypeError):
+                        val = custom_value
+                    st.session_state[f'{panel_name}_params'][custom_name] = {
+                        'value': val, 'unit': custom_unit
+                    }
+                    st.rerun()
+                else:
+                    st.warning("Enter both parameter name and value.")
+    except Exception as e:
+        st.error(f"Error in add custom section: {e}")
 
 
 def render_current_params_table(panel_name: str):
     """Show current parameters as a table."""
-    params = st.session_state.get(f'{panel_name}_params', {})
-    if params:
-        st.markdown("#### 📋 Current Parameters")
-        rows = []
-        for name, data in params.items():
-            rows.append({
-                'Parameter': name,
-                'Value': data.get('value', ''),
-                'Unit': data.get('unit', '')
-            })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    try:
+        params = st.session_state.get(f'{panel_name}_params', {})
+        if params:
+            st.markdown("#### 📋 Current Parameters")
+            rows = []
+            for name, data in params.items():
+                rows.append({
+                    'Parameter': name,
+                    'Value': data.get('value', ''),
+                    'Unit': data.get('unit', '')
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.error(f"Error rendering parameters table: {e}")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -665,47 +737,49 @@ with main_tabs[0]:
     if uploaded_files:
         for uf in uploaded_files:
             with st.expander(f"📄 {uf.name}", expanded=True):
-                c1, c2 = st.columns([1, 1])
-                with c1:
-                    if uf.type in ['image/jpeg', 'image/jpg', 'image/png']:
-                        from PIL import Image
-                        img = Image.open(uf)
-                        st.image(img, caption=uf.name, use_container_width=True)
-                        uf.seek(0)
-                with c2:
-                    with st.spinner("Extracting data..."):
-                        text, params, info = process_uploaded_file(uf)
-                    
-                    st.text_area("Extracted Text", text, height=200, key=f"txt_{uf.name}")
-                    
-                    if params:
-                        st.success(f"✅ Extracted {len(params)} parameters")
-                        # Route to correct panel
-                        for pname, pdata in params.items():
-                            routed = False
-                            for panel, pcfg_list in PANEL_PARAM_MAP.items():
-                                panel_keys = [c['key'] for c in pcfg_list]
-                                if pname in panel_keys:
-                                    st.session_state[f'{panel}_params'][pname] = pdata
-                                    routed = True
-                                    break
-                            if not routed:
-                                st.session_state['CBC_params'][pname] = pdata
-                    else:
-                        st.warning("No parameters auto-extracted. Use manual entry.")
-                    
-                    if info:
-                        for k, v in info.items():
-                            st.session_state.patient_info[k] = v
-                    
-                    st.session_state.extracted_text += text + "\n"
+                try:
+                    c1, c2 = st.columns([1, 1])
+                    with c1:
+                        if uf.type in ['image/jpeg', 'image/jpg', 'image/png']:
+                            img = Image.open(uf)
+                            st.image(img, caption=uf.name, use_container_width=True)
+                            uf.seek(0)
+                    with c2:
+                        with st.spinner("Extracting data..."):
+                            text, params, info = process_uploaded_file(uf)
+                        
+                        st.text_area("Extracted Text", text, height=200, key=f"txt_{uf.name}")
+                        
+                        if params:
+                            st.success(f"✅ Extracted {len(params)} parameters")
+                            # Route to correct panel
+                            for pname, pdata in params.items():
+                                routed = False
+                                for panel, pcfg_list in PANEL_PARAM_MAP.items():
+                                    panel_keys = [c['key'] for c in pcfg_list]
+                                    if pname in panel_keys:
+                                        st.session_state[f'{panel}_params'][pname] = pdata
+                                        routed = True
+                                        break
+                                if not routed:
+                                    st.session_state['CBC_params'][pname] = pdata
+                        else:
+                            st.warning("No parameters auto-extracted. Use manual entry.")
+                        
+                        if info:
+                            for k, v in info.items():
+                                st.session_state.patient_info[k] = v
+                        
+                        st.session_state.extracted_text += text + "\n"
+                except Exception as e:
+                    st.error(f"Error processing file {uf.name}: {e}")
         
         # Show summary
         st.markdown("### 📊 Extraction Summary")
         for panel in PANELS:
             count = len(st.session_state.get(f'{panel}_params', {}))
             if count > 0:
-                st.write(f"{PANEL_ICONS.get(panel,'')} **{panel}**: {count} parameters extracted")
+                st.write(f"{PANEL_ICONS.get(panel, '')} **{panel}**: {count} parameters extracted")
 
 # ── TAB 2: Manual Entry ─────────────────────────────────────
 with main_tabs[1]:
@@ -729,11 +803,11 @@ with main_tabs[1]:
     if not active:
         st.info("Select at least one panel in the sidebar.")
     else:
-        panel_tabs = st.tabs([f"{PANEL_ICONS.get(p,'')} {p}" for p in active])
+        panel_tabs = st.tabs([f"{PANEL_ICONS.get(p, '')} {p}" for p in active])
         
         for idx, panel in enumerate(active):
             with panel_tabs[idx]:
-                st.markdown(f'<div class="panel-header">{PANEL_ICONS.get(panel,"")} {panel} Parameters</div>',
+                st.markdown(f'<div class="panel-header">{PANEL_ICONS.get(panel, "")} {panel} Parameters</div>',
                            unsafe_allow_html=True)
                 
                 param_cfgs = PANEL_PARAM_MAP.get(panel, [])
@@ -766,13 +840,15 @@ with main_tabs[2]:
                         analyzer = PANEL_ANALYZER.get(panel)
                         if analyzer:
                             try:
+                                # Get sex from sidebar
+                                sex = st.session_state.patient_info.get('sex', 'Default')
                                 result = analyzer(params, sex)
                                 st.session_state[f'{panel}_analysis'] = result
                             except Exception as e:
                                 st.error(f"Error analyzing {panel}: {e}")
         
         # Display results per panel
-        analysis_tabs = st.tabs([f"{PANEL_ICONS.get(p,'')} {p}" for p in active])
+        analysis_tabs = st.tabs([f"{PANEL_ICONS.get(p, '')} {p}" for p in active])
         
         for idx, panel in enumerate(active):
             with analysis_tabs[idx]:
@@ -800,28 +876,31 @@ with main_tabs[3]:
         
         if st.button("🧠 Generate AI Review", type="primary"):
             with st.spinner("Claude is analyzing..."):
-                if review_panel == 'All Active Panels':
-                    all_data = {}
-                    for p in st.session_state.active_panels:
-                        a = st.session_state.get(f'{p}_analysis')
+                try:
+                    if review_panel == 'All Active Panels':
+                        all_data = {}
+                        for p in st.session_state.active_panels:
+                            a = st.session_state.get(f'{p}_analysis')
+                            if a:
+                                all_data[p] = a
+                        if all_data:
+                            review = get_panel_ai_review(
+                                all_data, st.session_state.patient_info, api_key
+                            )
+                            st.session_state.ai_review_text = review
+                        else:
+                            st.warning("Run analyses first.")
+                    else:
+                        a = st.session_state.get(f'{review_panel}_analysis')
                         if a:
-                            all_data[p] = a
-                    if all_data:
-                        review = get_panel_ai_review(
-                            all_data, st.session_state.patient_info, api_key
-                        )
-                        st.session_state.ai_review_text = review
-                    else:
-                        st.warning("Run analyses first.")
-                else:
-                    a = st.session_state.get(f'{review_panel}_analysis')
-                    if a:
-                        review = get_panel_ai_review(
-                            {review_panel: a}, st.session_state.patient_info, api_key
-                        )
-                        st.session_state.ai_review_text = review
-                    else:
-                        st.warning(f"Run {review_panel} analysis first.")
+                            review = get_panel_ai_review(
+                                {review_panel: a}, st.session_state.patient_info, api_key
+                            )
+                            st.session_state.ai_review_text = review
+                        else:
+                            st.warning(f"Run {review_panel} analysis first.")
+                except Exception as e:
+                    st.error(f"Error generating AI review: {e}")
         
         if st.session_state.ai_review_text:
             st.markdown("---")
@@ -839,49 +918,52 @@ with main_tabs[4]:
     if not has_analysis:
         st.info("Run analyses first to generate a report.")
     else:
-        include_ai = st.checkbox("Include AI Review", value=bool(st.session_state.ai_review_text))
-        
-        if st.button("📥 Generate PDF Report", type="primary"):
-            with st.spinner("Generating PDF..."):
-                all_analyses = {}
-                for p in st.session_state.active_panels:
-                    a = st.session_state.get(f'{p}_analysis')
-                    if a:
-                        all_analyses[p] = a
-                
-                ai_text = st.session_state.ai_review_text if include_ai else None
-                pdf_bytes = generate_multi_panel_pdf(
-                    all_analyses,
-                    st.session_state.patient_info,
-                    ai_text
-                )
-                st.download_button(
-                    "⬇️ Download PDF",
-                    data=pdf_bytes,
-                    file_name=f"lab_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                    mime="application/pdf"
-                )
-        
-        # Text summary
-        st.markdown("---")
-        summary_parts = []
-        for p in st.session_state.active_panels:
-            a = st.session_state.get(f'{p}_analysis')
-            if a and a.get('parameters'):
-                summary_parts.append(f"\n{'='*50}\n{p} ANALYSIS\n{'='*50}")
-                for pname, pdata in a['parameters'].items():
-                    c = pdata.get('classification', {})
-                    summary_parts.append(
-                        f"  {pname}: {pdata.get('value','')} {pdata.get('unit','')} "
-                        f"[{c.get('status','').upper()}]"
+        try:
+            include_ai = st.checkbox("Include AI Review", value=bool(st.session_state.ai_review_text))
+            
+            if st.button("📥 Generate PDF Report", type="primary"):
+                with st.spinner("Generating PDF..."):
+                    all_analyses = {}
+                    for p in st.session_state.active_panels:
+                        a = st.session_state.get(f'{p}_analysis')
+                        if a:
+                            all_analyses[p] = a
+                    
+                    ai_text = st.session_state.ai_review_text if include_ai else None
+                    pdf_bytes = generate_multi_panel_pdf(
+                        all_analyses,
+                        st.session_state.patient_info,
+                        ai_text
                     )
-        
-        if summary_parts:
-            summary_text = "\n".join(summary_parts)
-            st.text_area("Summary", summary_text, height=300)
-            st.download_button(
-                "⬇️ Download Text",
-                data=summary_text,
-                file_name=f"lab_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                mime="text/plain"
-            )
+                    st.download_button(
+                        "⬇️ Download PDF",
+                        data=pdf_bytes,
+                        file_name=f"lab_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf"
+                    )
+            
+            # Text summary
+            st.markdown("---")
+            summary_parts = []
+            for p in st.session_state.active_panels:
+                a = st.session_state.get(f'{p}_analysis')
+                if a and a.get('parameters'):
+                    summary_parts.append(f"\n{'='*50}\n{p} ANALYSIS\n{'='*50}")
+                    for pname, pdata in a['parameters'].items():
+                        c = pdata.get('classification', {})
+                        summary_parts.append(
+                            f"  {pname}: {pdata.get('value', '')} {pdata.get('unit', '')} "
+                            f"[{c.get('status', '').upper()}]"
+                        )
+            
+            if summary_parts:
+                summary_text = "\n".join(summary_parts)
+                st.text_area("Summary", summary_text, height=300)
+                st.download_button(
+                    "⬇️ Download Text",
+                    data=summary_text,
+                    file_name=f"lab_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain"
+                )
+        except Exception as e:
+            st.error(f"Error in report generation: {e}")
