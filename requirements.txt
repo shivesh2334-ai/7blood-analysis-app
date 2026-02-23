@@ -10,3 +10,21 @@ plotly
 python-dotenv
 streamlit-option-menu
 pdfplumber
+# Core dependencies
+#streamlit>=1.28.0
+numpy
+#pandas>=2.0.0
+
+# OCR and Image Processing
+#pytesseract>=0.3.10
+#Pillow>=10.0.0
+pdf2image
+PyMuPDF
+opencv-python
+
+# AI Integration (optional)
+#anthropic>=0.8.0
+
+# Utilities
+python-dateutil
+typing-extensions
