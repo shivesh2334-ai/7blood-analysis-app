@@ -1,6 +1,6 @@
 """
-analysis_engine.py — Comprehensive Clinical Analysis Engine
-============================================================
+clinical_analysis_engine.py — Comprehensive Clinical Analysis Engine
+======================================================================
 Provides multi-panel clinical analysis with:
 
   • Reference range validation & clinical classification
@@ -25,16 +25,13 @@ Public API
 """
 
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from datetime import datetime
 import json
 
 # ============================================================================
-# COMPREHENSIVE REFERENCE RANGES BY PARAMETER & SEX
+# PANEL DEFINITIONS
 # ============================================================================
-
-REFERENCE_RANGES = {
-# Add these constants to utils/analysis_engine.py
 
 PANEL_LABELS = {
     "CBC": "Complete Blood Count",
@@ -67,33 +64,39 @@ PANEL_ICONS = {
 # Map each panel to its parameters
 PANEL_PARAMETER_MAP = {
     "CBC": ["RBC", "Hemoglobin", "Hematocrit", "MCV", "MCH", "MCHC", "RDW", "RDW_SD", "WBC", "Neutrophils", "Lymphocytes", "Monocytes", "Eosinophils", "Basophils", "Platelets", "MPV", "PDW", "PCT"],
-    "LFT": ["ALT", "AST", "ALP", "GGT", "Bilirubin_Total", "Bilirubin_Direct", "Bilirubin_Indirect", "Albumin", "Total_Protein", "Globulin", "Albumin_Globulin_Ratio", "PT", "INR"],
-    "KFT": ["Creatinine", "BUN", "Urea", "Uric_Acid", "eGFR", "Cystatin_C", "Sodium", "Potassium", "Chloride", "Bicarbonate", "Calcium", "Phosphate", "Magnesium"],
-    "LIPID": ["Total_Cholesterol", "HDL", "LDL", "VLDL", "Triglycerides", "Non_HDL", "TC_HDL_Ratio", "LDL_HDL_Ratio", "ApoA1", "ApoB", "Lp_a"],
-    "DIABETES": ["Fasting_Glucose", "Random_Glucose", "PP_Glucose", "HbA1c", "eAG", "Insulin", "C_Peptide", "HOMA_IR"],
-    "TFT": ["TSH", "T3", "T4", "FT3", "FT4", "Reverse_T3", "T3_Uptake", "Anti_TPO", "Anti_Thyroglobulin", "TSH_Receptor_Ab", "Thyroglobulin"],
+    "LFT": ["ALT", "AST", "ALP", "GGT", "Total_Bilirubin", "Direct_Bilirubin", "Indirect_Bilirubin", "Albumin", "Total_Protein", "Globulin", "Albumin_Globulin_Ratio", "PT", "INR"],
+    "KFT": ["Serum_Creatinine", "BUN", "Serum_Urea", "Uric_Acid", "eGFR", "Cystatin_C", "Serum_Sodium", "Serum_Potassium", "Serum_Chloride", "Serum_Bicarbonate", "Serum_Calcium", "Serum_Phosphorus", "Serum_Magnesium"],
+    "LIPID": ["Total_Cholesterol", "HDL_Cholesterol", "LDL_Cholesterol", "VLDL_Cholesterol", "Triglycerides", "Non_HDL_Cholesterol", "TC_HDL_Ratio", "LDL_HDL_Ratio", "ApoA1", "ApoB", "Lp_a"],
+    "DIABETES": ["Fasting_Blood_Glucose", "Random_Blood_Glucose", "PP_Blood_Glucose", "HbA1c", "eAG", "Fasting_Insulin", "C_Peptide", "HOMA_IR"],
+    "TFT": ["TSH", "Total_T3", "Total_T4", "Free_T3", "Free_T4", "Reverse_T3", "T3_Uptake", "Anti_TPO", "Anti_Thyroglobulin", "TSH_Receptor_Ab", "Thyroglobulin"],
     "VIT_D": ["Vitamin_D_25OH"],
-    "VIT_B12": ["Vitamin_B12", "Folate"],
+    "VIT_B12": ["Vitamin_B12", "Serum_Folate"],
     "URINE_RM": ["Color", "Appearance", "pH", "Specific_Gravity", "Protein", "Glucose", "Ketones", "Nitrites", "Leukocyte_Esterase", "RBC", "WBC", "Bacteria", "Crystals", "Casts", "Epithelial_Cells"],
     "RHEUMA": ["RA_Factor", "Anti_CCP", "ANA", "Anti_dsDNA", "Anti_Smith", "Anti_Sm", "Complement_C3", "Complement_C4", "ESR", "CRP"],
-    "ONCOLOGY": ["AFP", "CEA", "CA_19_9", "CA_125", "PSA", "Beta_hCG"],
+    "ONCOLOGY": ["AFP", "CEA", "CA_19_9", "CA_125", "PSA_Total", "Beta_hCG"],
 }
-  # ────────────────────────────────────────────────────────────────────
+
+# ============================================================================
+# COMPREHENSIVE REFERENCE RANGES BY PARAMETER & SEX
+# ============================================================================
+
+REFERENCE_RANGES = {
+    # ──────────��──────────────────────────────────────────────────────────
     # CBC Parameters
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     "RBC": {
-        "Male":    {"low": 4.5, "high": 5.9, "unit": "×10¹²/L", "critical_low": 2.0, "critical_high": 8.0},
-        "Female":  {"low": 4.1, "high": 5.1, "unit": "×10¹²/L", "critical_low": 2.0, "critical_high": 8.0},
+        "Male": {"low": 4.5, "high": 5.9, "unit": "×10¹²/L", "critical_low": 2.0, "critical_high": 8.0},
+        "Female": {"low": 4.1, "high": 5.1, "unit": "×10¹²/L", "critical_low": 2.0, "critical_high": 8.0},
         "Default": {"low": 4.1, "high": 5.9, "unit": "×10¹²/L", "critical_low": 2.0, "critical_high": 8.0},
     },
     "Hemoglobin": {
-        "Male":    {"low": 13.5, "high": 17.5, "unit": "g/dL", "critical_low": 5.0, "critical_high": 20.0},
-        "Female":  {"low": 12.0, "high": 15.5, "unit": "g/dL", "critical_low": 5.0, "critical_high": 20.0},
+        "Male": {"low": 13.5, "high": 17.5, "unit": "g/dL", "critical_low": 5.0, "critical_high": 20.0},
+        "Female": {"low": 12.0, "high": 15.5, "unit": "g/dL", "critical_low": 5.0, "critical_high": 20.0},
         "Default": {"low": 12.0, "high": 17.5, "unit": "g/dL", "critical_low": 5.0, "critical_high": 20.0},
     },
     "Hematocrit": {
-        "Male":    {"low": 38.8, "high": 50.0, "unit": "%", "critical_low": 15.0, "critical_high": 60.0},
-        "Female":  {"low": 34.9, "high": 44.5, "unit": "%", "critical_low": 15.0, "critical_high": 60.0},
+        "Male": {"low": 38.8, "high": 50.0, "unit": "%", "critical_low": 15.0, "critical_high": 60.0},
+        "Female": {"low": 34.9, "high": 44.5, "unit": "%", "critical_low": 15.0, "critical_high": 60.0},
         "Default": {"low": 34.9, "high": 50.0, "unit": "%", "critical_low": 15.0, "critical_high": 60.0},
     },
     "MCV": {
@@ -105,8 +108,11 @@ PANEL_PARAMETER_MAP = {
     "MCHC": {
         "Default": {"low": 32, "high": 36, "unit": "g/dL", "critical_low": 20, "critical_high": 50},
     },
-    "RDW_CV": {
+    "RDW": {
         "Default": {"low": 11.5, "high": 14.5, "unit": "%", "critical_low": 5, "critical_high": 30},
+    },
+    "RDW_SD": {
+        "Default": {"low": 39, "high": 46, "unit": "fL", "critical_low": 30, "critical_high": 60},
     },
     "WBC": {
         "Default": {"low": 4.5, "high": 11.0, "unit": "×10⁹/L", "critical_low": 0.5, "critical_high": 100},
@@ -138,31 +144,37 @@ PANEL_PARAMETER_MAP = {
     "MPV": {
         "Default": {"low": 7.4, "high": 10.4, "unit": "fL", "critical_low": 3, "critical_high": 20},
     },
+    "PDW": {
+        "Default": {"low": 15, "high": 17, "unit": "%", "critical_low": 10, "critical_high": 25},
+    },
+    "PCT": {
+        "Default": {"low": 0.108, "high": 0.282, "unit": "%", "critical_low": 0.05, "critical_high": 0.8},
+    },
     "ESR": {
-        "Male":    {"low": 0, "high": 15, "unit": "mm/hr", "critical_low": 0, "critical_high": 100},
-        "Female":  {"low": 0, "high": 20, "unit": "mm/hr", "critical_low": 0, "critical_high": 100},
+        "Male": {"low": 0, "high": 15, "unit": "mm/hr", "critical_low": 0, "critical_high": 100},
+        "Female": {"low": 0, "high": 20, "unit": "mm/hr", "critical_low": 0, "critical_high": 100},
         "Default": {"low": 0, "high": 20, "unit": "mm/hr", "critical_low": 0, "critical_high": 100},
     },
 
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     # LFT Parameters
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     "ALT": {
-        "Male":    {"low": 7, "high": 56, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
-        "Female":  {"low": 7, "high": 45, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
+        "Male": {"low": 7, "high": 56, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
+        "Female": {"low": 7, "high": 45, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
         "Default": {"low": 7, "high": 56, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
     },
     "AST": {
-        "Male":    {"low": 10, "high": 40, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
-        "Female":  {"low": 7, "high": 35, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
+        "Male": {"low": 10, "high": 40, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
+        "Female": {"low": 7, "high": 35, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
         "Default": {"low": 7, "high": 40, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
     },
     "ALP": {
         "Default": {"low": 30, "high": 120, "unit": "IU/L", "critical_low": 0, "critical_high": 1000},
     },
     "GGT": {
-        "Male":    {"low": 0, "high": 65, "unit": "IU/L", "critical_low": 0, "critical_high": 1000},
-        "Female":  {"low": 0, "high": 36, "unit": "IU/L", "critical_low": 0, "critical_high": 1000},
+        "Male": {"low": 0, "high": 65, "unit": "IU/L", "critical_low": 0, "critical_high": 1000},
+        "Female": {"low": 0, "high": 36, "unit": "IU/L", "critical_low": 0, "critical_high": 1000},
         "Default": {"low": 0, "high": 65, "unit": "IU/L", "critical_low": 0, "critical_high": 1000},
     },
     "Total_Bilirubin": {
@@ -171,19 +183,34 @@ PANEL_PARAMETER_MAP = {
     "Direct_Bilirubin": {
         "Default": {"low": 0.0, "high": 0.3, "unit": "mg/dL", "critical_low": 0, "critical_high": 30},
     },
+    "Indirect_Bilirubin": {
+        "Default": {"low": 0.1, "high": 1.0, "unit": "mg/dL", "critical_low": 0, "critical_high": 30},
+    },
     "Total_Protein": {
         "Default": {"low": 6.0, "high": 8.3, "unit": "g/dL", "critical_low": 2.0, "critical_high": 15.0},
     },
     "Albumin": {
         "Default": {"low": 3.5, "high": 5.0, "unit": "g/dL", "critical_low": 1.0, "critical_high": 10.0},
     },
+    "Globulin": {
+        "Default": {"low": 2.0, "high": 3.5, "unit": "g/dL", "critical_low": 0.5, "critical_high": 10.0},
+    },
+    "Albumin_Globulin_Ratio": {
+        "Default": {"low": 1.0, "high": 2.5, "unit": "ratio", "critical_low": 0.5, "critical_high": 5.0},
+    },
+    "PT": {
+        "Default": {"low": 11.0, "high": 13.5, "unit": "seconds", "critical_low": 0, "critical_high": 100},
+    },
+    "INR": {
+        "Default": {"low": 0.8, "high": 1.1, "unit": "ratio", "critical_low": 0, "critical_high": 10},
+    },
 
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     # KFT Parameters
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     "Serum_Creatinine": {
-        "Male":    {"low": 0.7, "high": 1.3, "unit": "mg/dL", "critical_low": 0.1, "critical_high": 30.0},
-        "Female":  {"low": 0.6, "high": 1.1, "unit": "mg/dL", "critical_low": 0.1, "critical_high": 30.0},
+        "Male": {"low": 0.7, "high": 1.3, "unit": "mg/dL", "critical_low": 0.1, "critical_high": 30.0},
+        "Female": {"low": 0.6, "high": 1.1, "unit": "mg/dL", "critical_low": 0.1, "critical_high": 30.0},
         "Default": {"low": 0.6, "high": 1.3, "unit": "mg/dL", "critical_low": 0.1, "critical_high": 30.0},
     },
     "BUN": {
@@ -191,6 +218,17 @@ PANEL_PARAMETER_MAP = {
     },
     "Serum_Urea": {
         "Default": {"low": 15, "high": 45, "unit": "mg/dL", "critical_low": 0, "critical_high": 500},
+    },
+    "Uric_Acid": {
+        "Male": {"low": 3.5, "high": 7.2, "unit": "mg/dL", "critical_low": 0, "critical_high": 20},
+        "Female": {"low": 2.6, "high": 6.0, "unit": "mg/dL", "critical_low": 0, "critical_high": 20},
+        "Default": {"low": 2.6, "high": 7.2, "unit": "mg/dL", "critical_low": 0, "critical_high": 20},
+    },
+    "eGFR": {
+        "Default": {"low": 60, "high": 999, "unit": "mL/min/1.73m²", "critical_low": 0, "critical_high": 200},
+    },
+    "Cystatin_C": {
+        "Default": {"low": 0.62, "high": 1.04, "unit": "mg/L", "critical_low": 0, "critical_high": 10},
     },
     "Serum_Sodium": {
         "Default": {"low": 136, "high": 145, "unit": "mEq/L", "critical_low": 110, "critical_high": 170},
@@ -201,19 +239,22 @@ PANEL_PARAMETER_MAP = {
     "Serum_Chloride": {
         "Default": {"low": 98, "high": 107, "unit": "mEq/L", "critical_low": 80, "critical_high": 120},
     },
+    "Serum_Bicarbonate": {
+        "Default": {"low": 23, "high": 29, "unit": "mEq/L", "critical_low": 10, "critical_high": 50},
+    },
     "Serum_Calcium": {
         "Default": {"low": 8.5, "high": 10.2, "unit": "mg/dL", "critical_low": 6.0, "critical_high": 14.0},
     },
     "Serum_Phosphorus": {
         "Default": {"low": 2.5, "high": 4.5, "unit": "mg/dL", "critical_low": 1.0, "critical_high": 15.0},
     },
-    "eGFR": {
-        "Default": {"low": 60, "high": 999, "unit": "mL/min/1.73m²", "critical_low": 0, "critical_high": 200},
+    "Serum_Magnesium": {
+        "Default": {"low": 1.7, "high": 2.2, "unit": "mg/dL", "critical_low": 1.0, "critical_high": 5.0},
     },
 
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     # Lipid Profile
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     "Total_Cholesterol": {
         "Default": {"low": 0, "high": 200, "unit": "mg/dL", "optimal": 200, "borderline": 240, "critical_high": 500},
     },
@@ -223,39 +264,101 @@ PANEL_PARAMETER_MAP = {
     "LDL_Cholesterol": {
         "Default": {"low": 0, "high": 100, "unit": "mg/dL", "optimal": 100, "critical_high": 500},
     },
+    "VLDL_Cholesterol": {
+        "Default": {"low": 0, "high": 40, "unit": "mg/dL", "critical_high": 100},
+    },
     "Triglycerides": {
         "Default": {"low": 0, "high": 150, "unit": "mg/dL", "critical_high": 1000},
     },
+    "Non_HDL_Cholesterol": {
+        "Default": {"low": 0, "high": 160, "unit": "mg/dL", "critical_high": 400},
+    },
+    "TC_HDL_Ratio": {
+        "Default": {"low": 0, "high": 5.0, "unit": "ratio", "critical_high": 10},
+    },
+    "LDL_HDL_Ratio": {
+        "Default": {"low": 0, "high": 3.0, "unit": "ratio", "critical_high": 5},
+    },
+    "ApoA1": {
+        "Male": {"low": 120, "high": 160, "unit": "mg/dL", "critical_low": 80},
+        "Female": {"low": 130, "high": 180, "unit": "mg/dL", "critical_low": 90},
+        "Default": {"low": 120, "high": 180, "unit": "mg/dL", "critical_low": 80},
+    },
+    "ApoB": {
+        "Default": {"low": 60, "high": 130, "unit": "mg/dL", "critical_high": 200},
+    },
+    "Lp_a": {
+        "Default": {"low": 0, "high": 30, "unit": "mg/dL", "critical_high": 100},
+    },
 
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     # Diabetes Parameters
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     "Fasting_Blood_Glucose": {
         "Default": {"low": 70, "high": 100, "unit": "mg/dL", "critical_low": 40, "critical_high": 600},
-    },
-    "HbA1c": {
-        "Default": {"low": 0, "high": 5.7, "unit": "%", "critical_high": 15},
     },
     "Random_Blood_Glucose": {
         "Default": {"low": 70, "high": 140, "unit": "mg/dL", "critical_low": 40, "critical_high": 600},
     },
+    "PP_Blood_Glucose": {
+        "Default": {"low": 70, "high": 140, "unit": "mg/dL", "critical_low": 40, "critical_high": 600},
+    },
+    "HbA1c": {
+        "Default": {"low": 0, "high": 5.7, "unit": "%", "critical_high": 15},
+    },
+    "eAG": {
+        "Default": {"low": 70, "high": 130, "unit": "mg/dL", "critical_low": 40, "critical_high": 600},
+    },
+    "Fasting_Insulin": {
+        "Default": {"low": 2.0, "high": 12.0, "unit": "µU/mL", "critical_low": 0.5, "critical_high": 100},
+    },
+    "C_Peptide": {
+        "Default": {"low": 0.8, "high": 3.1, "unit": "ng/mL", "critical_low": 0, "critical_high": 10},
+    },
+    "HOMA_IR": {
+        "Default": {"low": 0.0, "high": 2.0, "unit": "ratio", "critical_high": 10},
+    },
 
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     # Thyroid Function
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     "TSH": {
         "Default": {"low": 0.4, "high": 4.0, "unit": "µIU/mL", "critical_low": 0, "critical_high": 100},
-    },
-    "Free_T4": {
-        "Default": {"low": 0.8, "high": 1.8, "unit": "ng/dL", "critical_low": 0, "critical_high": 5},
     },
     "Total_T3": {
         "Default": {"low": 80, "high": 200, "unit": "ng/dL", "critical_low": 20, "critical_high": 500},
     },
+    "Total_T4": {
+        "Default": {"low": 4.5, "high": 12.0, "unit": "µg/dL", "critical_low": 1, "critical_high": 30},
+    },
+    "Free_T3": {
+        "Default": {"low": 2.3, "high": 4.2, "unit": "pg/mL", "critical_low": 0.5, "critical_high": 10},
+    },
+    "Free_T4": {
+        "Default": {"low": 0.8, "high": 1.8, "unit": "ng/dL", "critical_low": 0, "critical_high": 5},
+    },
+    "Reverse_T3": {
+        "Default": {"low": 9.2, "high": 24.0, "unit": "pg/mL", "critical_low": 0, "critical_high": 100},
+    },
+    "T3_Uptake": {
+        "Default": {"low": 24, "high": 39, "unit": "%", "critical_low": 10, "critical_high": 60},
+    },
+    "Anti_TPO": {
+        "Default": {"low": 0, "high": 35, "unit": "IU/mL", "critical_high": 1000},
+    },
+    "Anti_Thyroglobulin": {
+        "Default": {"low": 0, "high": 40, "unit": "IU/mL", "critical_high": 1000},
+    },
+    "TSH_Receptor_Ab": {
+        "Default": {"low": 0, "high": 1.75, "unit": "IU/L", "critical_high": 10},
+    },
+    "Thyroglobulin": {
+        "Default": {"low": 0, "high": 55, "unit": "ng/mL", "critical_high": 500},
+    },
 
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     # Vitamin & Mineral Parameters
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     "Vitamin_D_25OH": {
         "Default": {"low": 30, "high": 100, "unit": "ng/mL", "deficient": 20, "insufficient": 29},
     },
@@ -266,9 +369,9 @@ PANEL_PARAMETER_MAP = {
         "Default": {"low": 5.4, "high": 16, "unit": "ng/mL", "critical_low": 2},
     },
 
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     # Rheumatology & Inflammation
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     "CRP": {
         "Default": {"low": 0, "high": 3.0, "unit": "mg/L", "critical_high": 100},
     },
@@ -278,21 +381,48 @@ PANEL_PARAMETER_MAP = {
     "RA_Factor": {
         "Default": {"low": 0, "high": 14, "unit": "IU/mL", "critical_high": 500},
     },
+    "Anti_CCP": {
+        "Default": {"low": 0, "high": 20, "unit": "U/mL", "critical_high": 200},
+    },
+    "ANA": {
+        "Default": {"low": 0, "high": 1.0, "unit": "titre", "critical_high": 1},
+    },
+    "Anti_dsDNA": {
+        "Default": {"low": 0, "high": 1.0, "unit": "IU/mL", "critical_high": 100},
+    },
+    "Anti_Smith": {
+        "Default": {"low": 0, "high": 1.0, "unit": "index", "critical_high": 1},
+    },
+    "Anti_Sm": {
+        "Default": {"low": 0, "high": 1.0, "unit": "index", "critical_high": 1},
+    },
+    "Complement_C3": {
+        "Default": {"low": 90, "high": 180, "unit": "mg/dL", "critical_low": 50},
+    },
+    "Complement_C4": {
+        "Default": {"low": 10, "high": 40, "unit": "mg/dL", "critical_low": 5},
+    },
 
-    # ───────────────────────────────────────────────────────��────────────
+    # ─────────────────────────────────────────────────────────────────────
     # Oncology Markers
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
     "PSA_Total": {
         "Default": {"low": 0, "high": 4.0, "unit": "ng/mL", "borderline": 4.0, "critical_high": 100},
     },
     "CEA": {
         "Default": {"low": 0, "high": 2.5, "unit": "ng/mL", "critical_high": 50},
     },
+    "CA_19_9": {
+        "Default": {"low": 0, "high": 37, "unit": "U/mL", "critical_high": 1000},
+    },
     "CA_125": {
         "Default": {"low": 0, "high": 35, "unit": "U/mL", "critical_high": 1000},
     },
     "AFP": {
         "Default": {"low": 0, "high": 10, "unit": "ng/mL", "critical_high": 10000},
+    },
+    "Beta_hCG": {
+        "Default": {"low": 0, "high": 5, "unit": "mIU/mL", "critical_high": 1000000},
     },
 }
 
@@ -306,23 +436,24 @@ DIFFERENTIAL_DIAGNOSES = {
         "low": {
             "title": "Anemia (Low Hemoglobin)",
             "conditions": [
-                {"name": "Iron Deficiency Anemia", "prevalence": "Most common", "note": "Check ferritin, iron saturation, TIBC. Low MCV, low MCH typical."},
-                {"name": "Vitamin B12 Deficiency", "prevalence": "Common in vegans/elderly", "note": "Check B12, folate, homocysteine. Macrocytic anemia."},
-                {"name": "Folate Deficiency", "prevalence": "Common in alcoholics", "note": "Check serum/RBC folate. Macrocytic anemia."},
-                {"name": "Chronic Kidney Disease", "prevalence": "Common in advanced CKD", "note": "Erythropoietin deficiency. Check creatinine, eGFR."},
-                {"name": "Hemolytic Anemia", "prevalence": "Various causes", "note": "Check bilirubin, LDH, reticulocyte count, direct Coombs."},
-                {"name": "Bone Marrow Disorders", "prevalence": "Serious", "note": "Leukemia, aplastic anemia, myelodysplasia. Check WBC, platelets."},
-                {"name": "Acute Hemorrhage", "prevalence": "Clinical context", "note": "Recent bleeding event. Watch for clinical signs."},
+                {"name": "Iron Deficiency Anemia", "prevalence": "Most common (30-50%)", "note": "Check ferritin, TIBC, serum iron. Low MCV, low MCH typical. Microcytic anemia."},
+                {"name": "Vitamin B12 Deficiency", "prevalence": "Common in vegans/elderly", "note": "Check B12, folate, homocysteine. Macrocytic anemia. Neurological signs?"},
+                {"name": "Folate Deficiency", "prevalence": "Alcoholics, dietary insufficiency", "note": "Check serum/RBC folate levels. Macrocytic anemia. Often with B12 deficiency."},
+                {"name": "Chronic Kidney Disease", "prevalence": "Common (eGFR <60)", "note": "Erythropoietin deficiency. Check creatinine, eGFR, kidney function."},
+                {"name": "Hemolytic Anemia", "prevalence": "5-10% of anemias", "note": "Check indirect bilirubin, LDH, reticulocyte count, haptoglobin, direct Coombs."},
+                {"name": "Bone Marrow Disorders", "prevalence": "Serious (1-5%)", "note": "Leukemia, aplastic anemia, myelodysplasia. Check WBC, platelets, reticulocyte count."},
+                {"name": "Acute Hemorrhage", "prevalence": "Clinical context dependent", "note": "Recent bleeding event. Watch for tachycardia, hypotension, clinical signs."},
+                {"name": "Anemia of Chronic Disease", "prevalence": "Common with chronic illness", "note": "Infections, malignancy, autoimmune. Check inflammatory markers (CRP, ESR)."},
             ],
         },
         "high": {
             "title": "Elevated Hemoglobin (Polycythemia)",
             "conditions": [
-                {"name": "Polycythemia Vera", "prevalence": "Hematologic malignancy", "note": "JAK2 V617F mutation. Check WBC, platelets for myeloproliferation."},
-                {"name": "Chronic Hypoxia", "prevalence": "Chronic lung/heart disease", "note": "Physiologic compensation for low O2. Check clinical history."},
-                {"name": "Erythropoietin-Secreting Tumors", "prevalence": "Renal cancer, hemangioma", "note": "Paraneoplastic syndrome. Check kidney imaging."},
-                {"name": "Dehydration", "prevalence": "Hemoconcentration", "note": "Apparent increase in Hb. Check BUN/Cr ratio, clinical state."},
-                {"name": "High Altitude", "prevalence": "Normal adaptive response", "note": "Chronic hypoxia stimulates EPO. Expected at elevation."},
+                {"name": "Polycythemia Vera", "prevalence": "Myeloproliferative (1-3%)", "note": "JAK2 V617F mutation positive. Check WBC, platelets, splenomegaly."},
+                {"name": "Chronic Hypoxia", "prevalence": "Chronic lung/heart disease", "note": "COPD, sleep apnea, cyanotic heart disease. Compensatory EPO increase."},
+                {"name": "Erythropoietin-Secreting Tumors", "prevalence": "Paraneoplastic syndrome", "note": "Renal cancer, hemangioma, hepatocellular carcinoma. Check kidney/liver imaging."},
+                {"name": "Dehydration", "prevalence": "Hemoconcentration", "note": "Apparent increase in Hb. Check BUN/Cr ratio, clinical hydration status."},
+                {"name": "High Altitude", "prevalence": "Physiologic adaptation", "note": "Chronic hypoxia stimulates EPO. Expected at elevation >2500m."},
             ],
         },
     },
@@ -330,24 +461,24 @@ DIFFERENTIAL_DIAGNOSES = {
         "low": {
             "title": "Leukopenia (Low WBC)",
             "conditions": [
-                {"name": "Bone Marrow Suppression", "prevalence": "Common", "note": "Medications, chemotherapy, radiation. Check medications list."},
-                {"name": "Infection/Sepsis", "prevalence": "Critical", "note": "Overwhelming bacterial infection depletes WBC. Clinical signs of infection?"},
-                {"name": "Aplastic Anemia", "prevalence": "Serious", "note": "Pancytopenia (low RBC, WBC, platelets). Bone marrow biopsy definitive."},
-                {"name": "SLE or Other Autoimmune", "prevalence": "Immune-mediated", "note": "Check ANA, anti-dsDNA, complement levels."},
-                {"name": "HIV/AIDS", "prevalence": "Immunosuppression", "note": "CD4 count typically low. Check HIV status."},
-                {"name": "Medication-Induced", "prevalence": "Common", "note": "NSAIDs, antibiotics, immunosuppressants, chemotherapy."},
+                {"name": "Bone Marrow Suppression", "prevalence": "Common (30-40%)", "note": "Medications (chemo, anticonvulsants), radiation. Check medication list and history."},
+                {"name": "Infection/Sepsis", "prevalence": "Critical (5-10%)", "note": "Overwhelming bacterial/fungal infection depletes WBC. Clinical signs: fever, hypotension."},
+                {"name": "Aplastic Anemia", "prevalence": "Serious (<1%)", "note": "Pancytopenia (low RBC, WBC, platelets). Bone marrow biopsy definitive diagnosis."},
+                {"name": "SLE or Other Autoimmune", "prevalence": "Immune-mediated", "note": "Lupus, RA. Check ANA, anti-dsDNA, ESR, CRP, complement levels."},
+                {"name": "HIV/AIDS", "prevalence": "Immunosuppression", "note": "CD4 count typically low. Check HIV status, CD4 count, viral load."},
+                {"name": "Medication-Induced", "prevalence": "Drug side effect", "note": "NSAIDs, sulfonamides, immunosuppressants. Review all current medications."},
             ],
         },
         "high": {
             "title": "Leukocytosis (High WBC)",
             "conditions": [
-                {"name": "Infection/Pneumonia", "prevalence": "Most common", "note": "Bacterial, viral, or fungal. Check neutrophil %, clinical signs."},
-                {"name": "Leukemia", "prevalence": "Hematologic malignancy", "note": "Acute or chronic. High WBC + blasts. Check smear, LDH."},
-                {"name": "Leukemoid Reaction", "prevalence": "Reactive", "note": "Extreme elevation (>50K) in response to severe infection/inflammation."},
-                {"name": "Chronic Myeloproliferative", "prevalence": "Hematologic", "note": "CML, polycythemia vera, myelofibrosis. JAK2 mutation studies."},
-                {"name": "Medications", "prevalence": "Steroids, catecholamines", "note": "Epinephrine, corticosteroids cause release from marginal pool."},
-                {"name": "Smoking", "prevalence": "Common habit effect", "note": "Chronic smokers have persistently elevated WBC. Reversible with cessation."},
-                {"name": "Malignancy", "prevalence": "Paraneoplastic", "note": "Lung, kidney cancers can elevate WBC. Check imaging."},
+                {"name": "Infection/Pneumonia", "prevalence": "Most common (50%+)", "note": "Bacterial, viral, or fungal. Check differential, CRP, clinical signs of infection."},
+                {"name": "Leukemia", "prevalence": "Hematologic malignancy", "note": "Acute or chronic. High WBC + blast cells. Check smear, LDH, lymph nodes."},
+                {"name": "Leukemoid Reaction", "prevalence": "Reactive elevation", "note": "Extreme elevation (>50K) to severe infection, burns, inflammation."},
+                {"name": "Chronic Myeloproliferative", "prevalence": "Hematologic disorder", "note": "CML, polycythemia vera. JAK2, BCR-ABL mutation studies."},
+                {"name": "Medications", "prevalence": "Steroids, catecholamines", "note": "Corticosteroids, epinephrine cause marginal pool release. Reversible on discontinuation."},
+                {"name": "Smoking", "prevalence": "Chronic habit effect", "note": "Chronic smokers persistently elevated WBC (1-2K higher). Reversible with cessation."},
+                {"name": "Malignancy", "prevalence": "Paraneoplastic syndrome", "note": "Lung, kidney cancers secrete cytokines. Resolves with cancer treatment."},
             ],
         },
     },
@@ -355,25 +486,25 @@ DIFFERENTIAL_DIAGNOSES = {
         "low": {
             "title": "Thrombocytopenia (Low Platelets)",
             "conditions": [
-                {"name": "Immune Thrombocytopenia (ITP)", "prevalence": "Most common acquired", "note": "Autoimmune destruction. Often 10-50K range. Check for splenomegaly."},
-                {"name": "Drug-Induced", "prevalence": "Common", "note": "NSAIDs, sulfonamides, statins, anticonvulsants. Discontinue if possible."},
-                {"name": "Bone Marrow Disorders", "prevalence": "Serious", "note": "Aplastic anemia, MDS, leukemia. Pancytopenia pattern."},
-                {"name": "TTP/HUS", "prevalence": "Thrombotic microangiopathy", "note": "Microangiopathic hemolytic anemia. High LDH, high creatinine."},
-                {"name": "DIC", "prevalence": "Disseminated Intravascular Coagulation", "note": "Critical. Prolonged PT/INR, low fibrinogen. Severe illness context."},
-                {"name": "Splenomegaly", "prevalence": "Sequestration", "note": "Portal hypertension, lymphoma. Physical exam critical."},
-                {"name": "Sepsis", "prevalence": "Critical illness", "note": "Severe infection causes consumptive thrombocytopenia."},
+                {"name": "Immune Thrombocytopenia (ITP)", "prevalence": "Most common acquired (50%)", "note": "Autoimmune destruction. Often 10-50K range. Check for bleeding, splenomegaly."},
+                {"name": "Drug-Induced", "prevalence": "Common (10-15%)", "note": "NSAIDs, sulfonamides, statins, anticonvulsants. Discontinue if possible."},
+                {"name": "Bone Marrow Disorders", "prevalence": "Serious (5-10%)", "note": "Aplastic anemia, MDS, leukemia. Pancytopenia pattern typical."},
+                {"name": "TTP/HUS", "prevalence": "Thrombotic microangiopathy", "note": "Hemolytic anemia, renal dysfunction. High LDH, high creatinine, low Hb."},
+                {"name": "DIC", "prevalence": "Disseminated Intravascular Coagulation", "note": "Critical condition. Prolonged PT/INR, low fibrinogen, elevated D-dimer."},
+                {"name": "Splenomegaly", "prevalence": "Sequestration (10-20%)", "note": "Portal hypertension, lymphoma. Physical exam critical; splenic enlargement palpable."},
+                {"name": "Sepsis", "prevalence": "Critical illness", "note": "Severe infection causes consumptive thrombocytopenia. Clinical shock signs present."},
             ],
         },
         "high": {
             "title": "Thrombocytosis (High Platelets)",
             "conditions": [
-                {"name": "Essential Thrombocythemia", "prevalence": "Primary hematologic", "note": "Myeloproliferative. JAK2 V617F, CALR, MPL mutations. Elevated risk of thrombosis."},
-                {"name": "Polycythemia Vera", "prevalence": "Myeloproliferative", "note": "Often elevated Hb, WBC, platelets together. JAK2+."},
-                {"name": "Chronic Myeloid Leukemia", "prevalence": "Philadelphia chromosome+", "note": "BCR-ABL fusion. Extreme elevation possible."},
-                {"name": "Infection/Inflammation", "prevalence": "Reactive", "note": "Acute phase response. Reversible with treatment of underlying cause."},
-                {"name": "Iron Deficiency", "prevalence": "Reactive", "note": "Mild elevation common. Corrects with iron replacement."},
-                {"name": "Malignancy", "prevalence": "Paraneoplastic", "note": "Lung, gastric, ovarian cancers. Resolves with cancer treatment."},
-                {"name": "Post-Splenectomy", "prevalence": "Permanent elevation", "note": "Normal consequence of absent spleen. Watch for thrombosis risk."},
+                {"name": "Essential Thrombocythemia", "prevalence": "Primary hematologic (30%)", "note": "Myeloproliferative. JAK2 V617F, CALR, MPL mutations. Thrombosis risk elevated."},
+                {"name": "Polycythemia Vera", "prevalence": "Myeloproliferative", "note": "Often elevated Hb, WBC, platelets together. JAK2 positive mutation."},
+                {"name": "Chronic Myeloid Leukemia", "prevalence": "Philadelphia chromosome+", "note": "BCR-ABL fusion gene positive. Extreme elevation possible; left shift on smear."},
+                {"name": "Infection/Inflammation", "prevalence": "Reactive (50%+)", "note": "Acute phase response to infection, trauma. Reversible with treatment."},
+                {"name": "Iron Deficiency", "prevalence": "Reactive (10-15%)", "note": "Mild elevation common with low ferritin. Corrects with iron replacement."},
+                {"name": "Malignancy", "prevalence": "Paraneoplastic (10%)", "note": "Lung, gastric, ovarian cancers. Resolves with successful cancer treatment."},
+                {"name": "Post-Splenectomy", "prevalence": "Permanent elevation", "note": "Normal post-surgical consequence. Persistent elevation; watch for thrombosis risk."},
             ],
         },
     },
@@ -381,11 +512,11 @@ DIFFERENTIAL_DIAGNOSES = {
         "high": {
             "title": "Hypercholesterolemia",
             "conditions": [
-                {"name": "Primary Hyperlipidemia", "prevalence": "Genetic", "note": "Familial hypercholesterolemia. Check family history, LDL pattern."},
-                {"name": "Secondary to Metabolic Syndrome", "prevalence": "Common", "note": "Obesity, diabetes, sedentary. Elevates TC, TG, LDL; lowers HDL."},
-                {"name": "Hypothyroidism", "prevalence": "Treatable", "note": "Check TSH, free T4. Cholesterol improves with thyroid replacement."},
-                {"name": "Liver Disease", "prevalence": "Can be increased", "note": "Cirrhosis paradoxically lowers. Cholestasis may elevate."},
-                {"name": "Chronic Kidney Disease", "prevalence": "Progressive", "note": "Nephrotic syndrome has severe dyslipidemia. Check albumin, proteinuria."},
+                {"name": "Primary Hyperlipidemia", "prevalence": "Genetic (25%)", "note": "Familial hypercholesterolemia. Strong family history; early CAD. High LDL pattern."},
+                {"name": "Secondary to Metabolic Syndrome", "prevalence": "Common (50%)", "note": "Obesity, diabetes, sedentary lifestyle. Elevates TC, TG, LDL; lowers HDL."},
+                {"name": "Hypothyroidism", "prevalence": "Treatable (10%)", "note": "Check TSH, free T4. Cholesterol improves with thyroid hormone replacement."},
+                {"name": "Liver Disease", "prevalence": "Variable", "note": "Cirrhosis paradoxically lowers; cholestasis may elevate. Check LFTs."},
+                {"name": "Chronic Kidney Disease", "prevalence": "Progressive", "note": "Nephrotic syndrome has severe dyslipidemia. Check albumin, urinary protein."},
             ],
         },
     },
@@ -393,13 +524,13 @@ DIFFERENTIAL_DIAGNOSES = {
         "high": {
             "title": "Elevated Creatinine (Renal Dysfunction)",
             "conditions": [
-                {"name": "Chronic Kidney Disease", "prevalence": "Progressive", "note": "Stages 1-5. Check eGFR, urinalysis, kidney imaging if new."},
-                {"name": "Acute Kidney Injury", "prevalence": "Acute", "note": "Sudden rise. Distinguish pre-renal, intrinsic, post-renal causes."},
-                {"name": "Dehydration", "prevalence": "Pre-renal", "note": "BUN/Cr >20 suggests pre-renal. Improves with hydration."},
-                {"name": "Hypertension", "prevalence": "Common cause of CKD", "note": "Chronic poorly controlled HTN damages kidneys. Check BP control."},
-                {"name": "Diabetes", "prevalence": "Most common cause globally", "note": "Diabetic nephropathy. Check glucose, HbA1c, proteinuria."},
-                {"name": "Glomerulonephritis", "prevalence": "Immune-mediated", "note": "Check urinalysis (RBC, casts), kidney biopsy if needed."},
-                {"name": "Muscle Disease", "prevalence": "High muscle mass", "note": "Athletes have higher baseline. Use eGFR/CKD-EPI for more accurate GFR."},
+                {"name": "Chronic Kidney Disease", "prevalence": "Progressive (15-20%)", "note": "Stages 1-5. Check eGFR, urinalysis, renal ultrasound if new or progressive."},
+                {"name": "Acute Kidney Injury", "prevalence": "Acute emergency", "note": "Sudden rise over days. Distinguish pre-renal, intrinsic, post-renal causes."},
+                {"name": "Dehydration", "prevalence": "Pre-renal (30%)", "note": "BUN/Cr >20 suggests pre-renal. Improves rapidly with hydration."},
+                {"name": "Hypertension", "prevalence": "Most common cause of CKD", "note": "Chronic poorly controlled HTN damages kidneys. Check BP trends."},
+                {"name": "Diabetes", "prevalence": "Most common globally", "note": "Diabetic nephropathy. Check glucose, HbA1c, urine protein, renal ultrasound."},
+                {"name": "Glomerulonephritis", "prevalence": "Immune-mediated (5-10%)", "note": "Check urinalysis (RBC, casts), kidney biopsy if rapid progression."},
+                {"name": "Muscle Injury", "prevalence": "High muscle mass athletes", "note": "Athletes have higher baseline. Use CKD-EPI eGFR formula for accuracy."},
             ],
         },
     },
@@ -407,20 +538,42 @@ DIFFERENTIAL_DIAGNOSES = {
         "high": {
             "title": "Elevated TSH (Primary Hypothyroidism)",
             "conditions": [
-                {"name": "Hashimoto's Thyroiditis", "prevalence": "Most common cause", "note": "Autoimmune. Check anti-TPO, anti-thyroglobulin. Fatigue, weight gain."},
-                {"name": "Iodine Deficiency", "prevalence": "Worldwide leading cause", "note": "Geographic areas with low iodine. Improvement with supplementation."},
-                {"name": "Hypothyroidism on Inadequate Levothyroxine", "prevalence": "Common compliance issue", "note": "Check dose, adherence. Repeat TSH 6-8 weeks after adjustment."},
-                {"name": "Central Hypothyroidism", "prevalence": "Secondary/tertiary", "note": "Low TSH + low free T4. Pituitary/hypothalamic disease. Check MRI if suspected."},
+                {"name": "Hashimoto's Thyroiditis", "prevalence": "Most common (90%)", "note": "Autoimmune thyroiditis. Anti-TPO, anti-thyroglobulin positive. Fatigue, weight gain."},
+                {"name": "Iodine Deficiency", "prevalence": "Worldwide leading cause", "note": "Geographic areas with low iodine. Improvement with iodized salt/supplementation."},
+                {"name": "Inadequate Levothyroxine Replacement", "prevalence": "Common compliance issue", "note": "Check dose, adherence. Repeat TSH 6-8 weeks after dose adjustment."},
+                {"name": "Central Hypothyroidism", "prevalence": "Secondary/tertiary", "note": "Low TSH + low T4 pattern. Pituitary/hypothalamic disease. MRI pituitary if suspected."},
             ],
         },
         "low": {
             "title": "Suppressed TSH (Hyperthyroidism or Over-replacement)",
             "conditions": [
-                {"name": "Graves' Disease", "prevalence": "Most common hyperthyroidism", "note": "Autoimmune. Check TSI antibodies. Heat intolerance, anxiety, tachycardia."},
-                {"name": "Thyroiditis", "prevalence": "Postpartum, viral, medication-induced", "note": "Painful or painless. Transient hyperthyroid phase."},
+                {"name": "Graves' Disease", "prevalence": "Most common hyperthyroidism (80%)", "note": "Autoimmune. TSI antibodies positive. Heat intolerance, anxiety, tachycardia, tremor."},
+                {"name": "Thyroiditis", "prevalence": "Postpartum, viral, medication-induced", "note": "Painful (subacute) or painless. Transient hyperthyroid phase lasting weeks."},
                 {"name": "Toxic Nodule/Multinodular Goiter", "prevalence": "Iodine-replete areas", "note": "Thyroid scan/ultrasound shows autonomously functioning nodule(s)."},
-                {"name": "Over-replacement with Levothyroxine", "prevalence": "Iatrogenic", "note": "Patient on thyroid hormone for hypothyroidism or TSH suppression. Adjust dose."},
-                {"name": "TSH-Secreting Pituitary Tumor", "prevalence": "Rare", "note": "High TSH with high free T4 (unusual pattern). MRI pituitary."},
+                {"name": "Over-replacement with Levothyroxine", "prevalence": "Iatrogenic (common)", "note": "Patient on thyroid hormone. Reduce dose; monitor TSH in 6-8 weeks."},
+                {"name": "TSH-Secreting Pituitary Tumor", "prevalence": "Rare (<1%)", "note": "High TSH + high T4 (unusual pattern). MRI pituitary required."},
+            ],
+        },
+    },
+    "Fasting_Blood_Glucose": {
+        "low": {
+            "title": "Hypoglycemia (Low Blood Glucose)",
+            "conditions": [
+                {"name": "Insulin Excess", "prevalence": "Common in diabetics", "note": "Excessive insulin/sulfonylurea dose. Check medication compliance."},
+                {"name": "Fasting State", "prevalence": "Normal physiologic", "note": "Prolonged fasting. Increase meal frequency or size."},
+                {"name": "Liver Disease", "prevalence": "Hepatic insufficiency", "note": "Impaired gluconeogenesis. Check LFTs, albumin, PT/INR."},
+                {"name": "Sepsis/Critical Illness", "prevalence": "Medical emergency", "note": "Severe infection/shock. Associated with poor prognosis."},
+                {"name": "Insulinoma", "prevalence": "Rare neuroendocrine", "note": "Insulin-secreting tumor. 72-hour fast diagnostic test; elevated insulin during hypoglycemia."},
+            ],
+        },
+        "high": {
+            "title": "Hyperglycemia (High Blood Glucose)",
+            "conditions": [
+                {"name": "Diabetes Mellitus Type 2", "prevalence": "Most common (90% diabetics)", "note": "Insulin resistance + relative deficiency. Check HbA1c, glucose trends."},
+                {"name": "Diabetes Mellitus Type 1", "prevalence": "Autoimmune (10% diabetics)", "note": "Absolute insulin deficiency. Anti-GAD, anti-islet cell antibodies positive."},
+                {"name": "Stress Hyperglycemia", "prevalence": "Acute illness/trauma", "note": "Critical care patients. Often improves with stress resolution."},
+                {"name": "Corticosteroid Use", "prevalence": "Medication-induced", "note": "Prednisone, dexamethasone. Improves after steroid discontinuation."},
+                {"name": "Infection/Sepsis", "prevalence": "Physiologic stress response", "note": "Cytokine-mediated glucose increase. Resolves with infection treatment."},
             ],
         },
     },
@@ -428,16 +581,32 @@ DIFFERENTIAL_DIAGNOSES = {
 
 
 # ============================================================================
-# CLASSIFICATION LOGIC
+# HELPER FUNCTIONS
 # ============================================================================
+
+def is_valid_numeric_value(value: Any) -> bool:
+    """
+    Check if value is a valid numeric type for analysis.
+    
+    Returns True for int/float but not bool (which is subclass of int in Python).
+    """
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
 
 def get_reference_range(param: str, sex: str = "Default") -> Optional[Dict]:
     """
     Get reference range for a parameter.
     
+    Args
+    ----
+    param : str
+        Parameter name (e.g., "Hemoglobin", "Serum_Creatinine")
+    sex : str
+        "Male", "Female", or "Default"
+    
     Returns
     -------
-    {"low": float, "high": float, "unit": str, ...}
+    {"low": float, "high": float, "unit": str, ...} or None if not found
     """
     if param not in REFERENCE_RANGES:
         return None
@@ -453,6 +622,15 @@ def get_reference_range(param: str, sex: str = "Default") -> Optional[Dict]:
 def classify_value(param: str, value: float, sex: str = "Default") -> Dict[str, Any]:
     """
     Classify a value as normal, low, high, or critical.
+    
+    Args
+    ----
+    param : str
+        Parameter name
+    value : float
+        Numeric value to classify
+    sex : str
+        "Male", "Female", or "Default"
     
     Returns
     -------
@@ -482,7 +660,7 @@ def classify_value(param: str, value: float, sex: str = "Default") -> Dict[str, 
     critical_high = ref.get("critical_high", high)
     unit = ref.get("unit", "")
     
-    # Determine status
+    # Determine status based on critical thresholds first, then normal ranges
     if critical_low is not None and value < critical_low:
         status = "critical_low"
         message = f"CRITICAL LOW: {value} {unit} (ref: {low}-{high})"
@@ -527,7 +705,7 @@ def get_differential_diagnosis(param: str, status: str) -> Optional[List[Dict]]:
     
     Returns
     -------
-    [{"name": str, "prevalence": str, "note": str}, ...]
+    [{"name": str, "prevalence": str, "note": str}, ...] or None if not available
     """
     if param not in DIFFERENTIAL_DIAGNOSES:
         return None
@@ -561,7 +739,7 @@ def check_sample_quality(parameters: Dict[str, Any]) -> Dict[str, Any]:
     issues = []
     score = 100
     
-    # Extract CBC values
+    # Extract CBC values using explicit None checks
     rbc = parameters.get("RBC", {}).get("value")
     hb = parameters.get("Hemoglobin", {}).get("value")
     hct = parameters.get("Hematocrit", {}).get("value")
@@ -569,10 +747,11 @@ def check_sample_quality(parameters: Dict[str, Any]) -> Dict[str, Any]:
     wbc = parameters.get("WBC", {}).get("value")
     platelets = parameters.get("Platelets", {}).get("value")
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Rule of Threes: RBC × 3 = Hb
-    # ────────────────────────────────────────────────────────────────
-    if rbc and hb:
+    # Expected: Hemoglobin should approximately equal RBC × 3
+    # ─────────────────────────────────────────────────────────────────
+    if rbc is not None and hb is not None and is_valid_numeric_value(rbc) and is_valid_numeric_value(hb):
         expected_hb = rbc * 3
         diff = abs(hb - expected_hb)
         if diff > 1.5:
@@ -585,10 +764,11 @@ def check_sample_quality(parameters: Dict[str, Any]) -> Dict[str, Any]:
             })
             score -= 10 if severity == "warning" else 20
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Rule of Threes: Hb × 3 = Hct
-    # ────────────────────────────────────────────────────────────────
-    if hb and hct:
+    # Expected: Hematocrit should approximately equal Hemoglobin × 3
+    # ─────────────────────────────────────────────────────────────────
+    if hb is not None and hct is not None and is_valid_numeric_value(hb) and is_valid_numeric_value(hct):
         expected_hct = hb * 3
         diff = abs(hct - expected_hct)
         if diff > 3.0:
@@ -597,14 +777,14 @@ def check_sample_quality(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 "rule": "Rule of Threes (Hb × 3 = Hct)",
                 "severity": severity,
                 "details": f"Expected Hct ≈ {expected_hct:.1f}%, got {hct:.1f}% (diff: {diff:.1f}%)",
-                "possible_causes": "Sample issues, abnormal hemoglobin, thalassemia",
+                "possible_causes": "Sample issues, abnormal hemoglobin, thalassemia, hemolysis",
             })
             score -= 10 if severity == "warning" else 20
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Mentzer Index: MCV/RBC < 13 suggests thalassemia; > 13 suggests iron deficiency
-    # ────────────────────────────────────────────────────────────────
-    if mcv and rbc and rbc > 0:
+    # ─────────────────────────────────────────────────────────────────
+    if mcv is not None and rbc is not None and is_valid_numeric_value(mcv) and is_valid_numeric_value(rbc) and rbc > 0:
         mentzer = mcv / rbc
         if mentzer < 10:
             issues.append({
@@ -615,10 +795,10 @@ def check_sample_quality(parameters: Dict[str, Any]) -> Dict[str, Any]:
             })
             score -= 5
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Physiologic Impossibilities
-    # ────────────────────────────────────────────────────────────────
-    if hct and (hct < 10 or hct > 65):
+    # ─────────────────────────────────────────────────────────────────
+    if hct is not None and is_valid_numeric_value(hct) and (hct < 10 or hct > 65):
         issues.append({
             "rule": "Hematocrit Out of Physiologic Range",
             "severity": "error",
@@ -627,7 +807,7 @@ def check_sample_quality(parameters: Dict[str, Any]) -> Dict[str, Any]:
         })
         score -= 20
     
-    if wbc and (wbc < 0.5 or wbc > 150):
+    if wbc is not None and is_valid_numeric_value(wbc) and (wbc < 0.5 or wbc > 150):
         issues.append({
             "rule": "WBC Out of Physiologic Range",
             "severity": "error",
@@ -636,7 +816,7 @@ def check_sample_quality(parameters: Dict[str, Any]) -> Dict[str, Any]:
         })
         score -= 20
     
-    if platelets and (platelets < 5 or platelets > 2000):
+    if platelets is not None and is_valid_numeric_value(platelets) and (platelets < 5 or platelets > 2000):
         issues.append({
             "rule": "Platelets Out of Physiologic Range",
             "severity": "error",
@@ -672,90 +852,100 @@ def calculate_indices(parameters: Dict[str, Any]) -> Dict[str, Any]:
     Returns
     -------
     {
-        "Mentzer Index": {...},
+        "Mentzer_Index": {...},
         "NLR": {...},
-        "BUN/Cr Ratio": {...},
+        "BUN_Creatinine_Ratio": {...},
         ...
     }
     """
     indices = {}
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # CBC Indices
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     rbc = parameters.get("RBC", {}).get("value")
     mcv = parameters.get("MCV", {}).get("value")
-    if rbc and mcv and rbc > 0:
+    if (rbc is not None and mcv is not None and is_valid_numeric_value(rbc) and 
+        is_valid_numeric_value(mcv) and rbc > 0):
         mentzer = mcv / rbc
         indices["Mentzer_Index"] = {
             "value": round(mentzer, 1),
             "formula": "MCV / RBC",
             "interpretation": "Thalassemia trait" if mentzer < 13 else "Iron deficiency or normal",
-            "note": "<13 suggestive of thalassemia; >13 iron deficiency",
+            "note": "<13 suggestive of thalassemia; >13 iron deficiency or normal",
         }
     
     hb = parameters.get("Hemoglobin", {}).get("value")
     hct = parameters.get("Hematocrit", {}).get("value")
-    if hb and hct and hct > 0:
+    if (hb is not None and hct is not None and is_valid_numeric_value(hb) and 
+        is_valid_numeric_value(hct) and hct > 0):
         calc_mchc = (hb / hct) * 100
         indices["Calculated_MCHC"] = {
             "value": round(calc_mchc, 1),
             "formula": "(Hb / Hct) × 100",
             "interpretation": f"{calc_mchc:.1f} g/dL",
-            "note": "Should match reported MCHC",
+            "note": "Should match reported MCHC; discrepancy suggests lab error",
         }
     
     wbc = parameters.get("WBC", {}).get("value")
     neutrophils = parameters.get("Neutrophils", {}).get("value")
     lymphocytes = parameters.get("Lymphocytes", {}).get("value")
     
-    if wbc and neutrophils:
+    if (wbc is not None and neutrophils is not None and is_valid_numeric_value(wbc) and 
+        is_valid_numeric_value(neutrophils)):
         anc = wbc * (neutrophils / 100)
         indices["Calculated_ANC"] = {
             "value": round(anc, 2),
             "formula": "WBC × (Neutrophils% / 100)",
             "interpretation": f"{anc:.2f} ×10⁹/L",
-            "note": "<1.5 neutropenia; <0.5 severe neutropenia",
+            "note": "<1.5 neutropenia; <0.5 severe neutropenia; high infection risk",
         }
     
-    if wbc and lymphocytes:
+    if (wbc is not None and lymphocytes is not None and is_valid_numeric_value(wbc) and 
+        is_valid_numeric_value(lymphocytes)):
         alc = wbc * (lymphocytes / 100)
         indices["Calculated_ALC"] = {
             "value": round(alc, 2),
             "formula": "WBC × (Lymphocytes% / 100)",
             "interpretation": f"{alc:.2f} ×10⁹/L",
-            "note": "Normal: 1.0-4.8 ×10⁹/L",
+            "note": "Normal: 1.0-4.8 ×10⁹/L; <0.5 lymphopenia",
         }
     
-    if wbc and neutrophils and lymphocytes:
-        nlr = (wbc * neutrophils / 100) / (wbc * lymphocytes / 100) if (wbc * lymphocytes / 100) > 0 else None
-        if nlr:
+    if (wbc is not None and neutrophils is not None and lymphocytes is not None and 
+        is_valid_numeric_value(wbc) and is_valid_numeric_value(neutrophils) and 
+        is_valid_numeric_value(lymphocytes)):
+        alc_calc = wbc * (lymphocytes / 100)
+        # NLR = Neutrophil to Lymphocyte Ratio (both as absolute counts)
+        if alc_calc > 0:
+            nlr = (wbc * neutrophils / 100) / alc_calc
             indices["NLR"] = {
                 "value": round(nlr, 2),
                 "formula": "ANC / ALC",
                 "interpretation": f"{nlr:.2f}",
-                "note": "Elevated NLR associated with infection, inflammation, poor prognosis in cancer",
+                "note": "Elevated NLR (>5) associated with infection, inflammation, poor prognosis in cancer",
             }
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # LFT Indices
-    # ────────────────────────────────────────────────────────────────
+    # ────────────────��────────────────────────────────────────────────
     total_bili = parameters.get("Total_Bilirubin", {}).get("value")
     direct_bili = parameters.get("Direct_Bilirubin", {}).get("value")
-    if total_bili and direct_bili:
+    if (total_bili is not None and direct_bili is not None and is_valid_numeric_value(total_bili) and 
+        is_valid_numeric_value(direct_bili)):
         indirect_bili = total_bili - direct_bili
-        indices["Indirect_Bilirubin"] = {
+        indices["Calculated_Indirect_Bilirubin"] = {
             "value": round(indirect_bili, 2),
             "formula": "Total Bilirubin - Direct Bilirubin",
             "interpretation": f"{indirect_bili:.2f} mg/dL",
-            "note": "Indirect hyperbilirubinemia suggests hemolysis or unconjugated hyperbilirubinemia",
+            "note": "Elevated indirect suggests hemolysis or unconjugated hyperbilirubinemia",
         }
     
     total_protein = parameters.get("Total_Protein", {}).get("value")
     albumin = parameters.get("Albumin", {}).get("value")
-    if total_protein and albumin:
+    if (total_protein is not None and albumin is not None and is_valid_numeric_value(total_protein) and 
+        is_valid_numeric_value(albumin)):
         globulin = total_protein - albumin
-        indices["Globulin"] = {
+        indices["Calculated_Globulin"] = {
             "value": round(globulin, 2),
             "formula": "Total Protein - Albumin",
             "interpretation": f"{globulin:.2f} g/dL",
@@ -766,27 +956,28 @@ def calculate_indices(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 "value": round(ag_ratio, 2),
                 "formula": "Albumin / Globulin",
                 "interpretation": f"{ag_ratio:.2f}",
-                "note": "Normally 1:1 to 2:1; inverted ratio suggests cirrhosis or chronic liver disease",
+                "note": "Normally 1:1 to 2:1; inverted ratio (<1) suggests cirrhosis or chronic liver disease",
             }
     
     alt = parameters.get("ALT", {}).get("value")
     ast = parameters.get("AST", {}).get("value")
-    if alt and ast:
-        ast_alt_ratio = ast / alt if alt > 0 else None
-        if ast_alt_ratio:
-            indices["AST_ALT_Ratio"] = {
-                "value": round(ast_alt_ratio, 2),
-                "formula": "AST / ALT",
-                "interpretation": f"{ast_alt_ratio:.2f}",
-                "note": "<1 hepatitis; >2 alcoholic liver disease or cirrhosis",
-            }
+    if (alt is not None and ast is not None and is_valid_numeric_value(alt) and 
+        is_valid_numeric_value(ast) and alt > 0):
+        ast_alt_ratio = ast / alt
+        indices["AST_ALT_Ratio"] = {
+            "value": round(ast_alt_ratio, 2),
+            "formula": "AST / ALT",
+            "interpretation": f"{ast_alt_ratio:.2f}",
+            "note": "<1 viral hepatitis; >2 alcoholic liver disease or cirrhosis",
+        }
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # KFT Indices
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     bun = parameters.get("BUN", {}).get("value")
     creatinine = parameters.get("Serum_Creatinine", {}).get("value")
-    if bun and creatinine and creatinine > 0:
+    if (bun is not None and creatinine is not None and is_valid_numeric_value(bun) and 
+        is_valid_numeric_value(creatinine) and creatinine > 0):
         bun_cr_ratio = bun / creatinine
         indices["BUN_Creatinine_Ratio"] = {
             "value": round(bun_cr_ratio, 1),
@@ -798,7 +989,10 @@ def calculate_indices(parameters: Dict[str, Any]) -> Dict[str, Any]:
     sodium = parameters.get("Serum_Sodium", {}).get("value")
     chloride = parameters.get("Serum_Chloride", {}).get("value")
     hco3 = parameters.get("Serum_Bicarbonate", {}).get("value")
-    if sodium and chloride and hco3:
+    if (sodium is not None and chloride is not None and hco3 is not None and 
+        is_valid_numeric_value(sodium) and is_valid_numeric_value(chloride) and 
+        is_valid_numeric_value(hco3)):
+        # Anion gap = Na - (Cl + HCO3); normal: 8-16 mEq/L
         anion_gap = sodium - (chloride + hco3)
         indices["Anion_Gap"] = {
             "value": round(anion_gap, 1),
@@ -807,39 +1001,43 @@ def calculate_indices(parameters: Dict[str, Any]) -> Dict[str, Any]:
             "note": ">12 metabolic acidosis with high anion gap; <8 low anion gap acidosis",
         }
     
-    # ────────────────────────────────────────────────────────────────
-    # Lipid Indices
-    # ────────────────────────────────────────────────────────��───────
+    # ─────────────────────────────────────────────────────────────────
+    # Lipid Indices (Friedewald formulas)
+    # ─────────────────────────────────────────────────────────────────
     tc = parameters.get("Total_Cholesterol", {}).get("value")
     hdl = parameters.get("HDL_Cholesterol", {}).get("value")
     triglycerides = parameters.get("Triglycerides", {}).get("value")
     
-    if triglycerides:
+    if (triglycerides is not None and is_valid_numeric_value(triglycerides)):
+        # VLDL = Triglycerides / 5 (when TG <400 mg/dL)
         vldl = triglycerides / 5
         indices["Calculated_VLDL"] = {
             "value": round(vldl, 1),
             "formula": "Triglycerides / 5",
             "interpretation": f"{vldl:.1f} mg/dL",
-            "note": "Estimated VLDL; direct VLDL measurement preferred if available",
+            "note": "Estimated VLDL using Friedewald; direct VLDL measurement preferred if TG >400",
         }
     
-    if tc and hdl and triglycerides and hdl > 0:
+    if (tc is not None and hdl is not None and triglycerides is not None and 
+        is_valid_numeric_value(tc) and is_valid_numeric_value(hdl) and 
+        is_valid_numeric_value(triglycerides) and hdl > 0 and triglycerides < 400):
         vldl = triglycerides / 5
         ldl = tc - hdl - vldl
         indices["Calculated_LDL"] = {
-            "value": round(ldl, 1),
+            "value": round(max(0, ldl), 1),  # LDL cannot be negative
             "formula": "TC - HDL - (Triglycerides/5)",
-            "interpretation": f"{ldl:.1f} mg/dL",
+            "interpretation": f"{max(0, ldl):.1f} mg/dL",
             "note": "Friedewald formula; less accurate if triglycerides >400 or LDL <25",
         }
     
-    if tc and hdl:
+    if (tc is not None and hdl is not None and is_valid_numeric_value(tc) and 
+        is_valid_numeric_value(hdl)):
         non_hdl = tc - hdl
         indices["Non_HDL_Cholesterol"] = {
             "value": round(non_hdl, 1),
             "formula": "TC - HDL",
             "interpretation": f"{non_hdl:.1f} mg/dL",
-            "note": "Better predictor of CVD risk than LDL alone; includes all atherogenic particles",
+            "note": "Better CVD risk predictor than LDL; includes all atherogenic particles",
         }
         
         if hdl > 0:
@@ -848,21 +1046,23 @@ def calculate_indices(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 "value": round(tc_hdl_ratio, 2),
                 "formula": "TC / HDL",
                 "interpretation": f"{tc_hdl_ratio:.2f}",
-                "note": "<5 good; >5 increased CVD risk",
+                "note": "<5 good; 5-6 average; >6 increased CVD risk",
             }
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Diabetes Indices
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     fbg = parameters.get("Fasting_Blood_Glucose", {}).get("value")
     fasting_insulin = parameters.get("Fasting_Insulin", {}).get("value")
-    if fbg and fasting_insulin:
+    if (fbg is not None and fasting_insulin is not None and is_valid_numeric_value(fbg) and 
+        is_valid_numeric_value(fasting_insulin)):
+        # HOMA-IR = (fasting glucose mg/dL × fasting insulin µU/mL) / 405
         homa_ir = (fbg * fasting_insulin) / 405
         indices["HOMA_IR"] = {
             "value": round(homa_ir, 2),
             "formula": "(FBG × Fasting Insulin) / 405",
             "interpretation": f"{homa_ir:.2f}",
-            "note": "<1 normal; 1-2 borderline; >2 insulin resistance",
+            "note": "<1 normal; 1-2 borderline; >2 insulin resistance; >4 severe resistance",
         }
     
     return indices
@@ -905,9 +1105,9 @@ def analyze_all_parameters(
     
     sex = patient_info.get("sex", "Default")
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Classify all parameters
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     classified = {}
     abnormalities = []
     critical_values = []
@@ -920,13 +1120,13 @@ def analyze_all_parameters(
         unit = param_data.get("unit", "")
         panel = param_data.get("panel", "Other")
         
-        # Skip if no value or is text (qualitative)
-        if value is None or isinstance(value, str):
+        # Handle non-numeric values (text/qualitative results)
+        if value is None or not is_valid_numeric_value(value):
             classified[param_key] = {
                 "value": value,
                 "unit": unit,
                 "panel": panel,
-                "classification": {"status": "text_value", "message": str(value), "color": "blue"},
+                "classification": {"status": "text_value", "message": str(value) if value is not None else "No value", "color": "blue"},
                 "differential": None,
             }
             continue
@@ -970,19 +1170,19 @@ def analyze_all_parameters(
             "differential": differential,
         }
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Quality checks
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     quality = check_sample_quality(parameters)
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Calculate indices
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     indices = calculate_indices(parameters)
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Panel grouping
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     panels = {}
     for param_key, param_data in classified.items():
         panel = param_data.get("panel", "Other")
@@ -990,9 +1190,9 @@ def analyze_all_parameters(
             panels[panel] = {}
         panels[panel][param_key] = param_data
     
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Summary statistics
-    # ────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     summary = {
         "analysis_date": datetime.now().isoformat(),
         "patient_info": patient_info,
@@ -1081,7 +1281,6 @@ def get_clinical_recommendations(analysis: Dict[str, Any]) -> List[Dict[str, str
     
     # Renal function
     creatinine = analysis["parameters"].get("Serum_Creatinine", {})
-    bun = analysis["parameters"].get("BUN", {})
     if creatinine.get("classification", {}).get("status") in ("high", "critical_high"):
         recommendations.append({
             "priority": "medium",
@@ -1128,38 +1327,38 @@ def generate_summary_report(analysis: Dict[str, Any], patient_info: Optional[Dic
         patient_info = analysis.get("summary", {}).get("patient_info", {})
     
     lines = []
-    lines.append("=" * 70)
-    lines.append("BLOOD INVESTIGATION ANALYSIS REPORT".center(70))
-    lines.append("=" * 70)
+    lines.append("=" * 80)
+    lines.append("BLOOD INVESTIGATION ANALYSIS REPORT".center(80))
+    lines.append("=" * 80)
     lines.append("")
     
     # Patient info
     if patient_info:
         lines.append("PATIENT INFORMATION")
-        lines.append("-" * 70)
+        lines.append("-" * 80)
         for key, value in patient_info.items():
             if value:
-                lines.append(f"  {key.replace('_', ' ').title():.<30} {value}")
+                lines.append(f"  {key.replace('_', ' ').title():.<35} {value}")
         lines.append("")
     
     # Summary
     summary = analysis.get("summary", {})
     lines.append("ANALYSIS SUMMARY")
-    lines.append("-" * 70)
-    lines.append(f"  Total Parameters Analyzed    {summary.get('total_parameters', 0)}")
-    lines.append(f"  Abnormal Values              {summary.get('abnormal_count', 0)}")
-    lines.append(f"  Critical Values              {summary.get('critical_count', 0)}")
-    lines.append(f"  Sample Quality Score         {summary.get('quality_score', 0)}%")
+    lines.append("-" * 80)
+    lines.append(f"  Total Parameters Analyzed........... {summary.get('total_parameters', 0)}")
+    lines.append(f"  Abnormal Values..................... {summary.get('abnormal_count', 0)}")
+    lines.append(f"  Critical Values..................... {summary.get('critical_count', 0)}")
+    lines.append(f"  Sample Quality Score............... {summary.get('quality_score', 0)}%")
     lines.append("")
     
     # Quality
     quality = analysis.get("quality", {})
     lines.append("SAMPLE QUALITY ASSESSMENT")
-    lines.append("-" * 70)
+    lines.append("-" * 80)
     lines.append(f"  Status: {quality.get('summary', 'Unknown')}")
     if quality.get("issues"):
         lines.append("  Issues Found:")
-        for issue in quality["issues"][:3]:
+        for issue in quality["issues"][:5]:
             severity_mark = "⚠ " if issue.get("severity") == "warning" else "✗ "
             lines.append(f"    {severity_mark}{issue.get('rule', 'Unknown')}")
             lines.append(f"       {issue.get('details', '')}")
@@ -1169,7 +1368,7 @@ def generate_summary_report(analysis: Dict[str, Any], patient_info: Optional[Dic
     critical = analysis.get("critical_values", [])
     if critical:
         lines.append("!!! CRITICAL VALUES !!!")
-        lines.append("-" * 70)
+        lines.append("-" * 80)
         for cv in critical:
             lines.append(f"  ✗ {cv['parameter']}: {cv['value']} ({cv['status']})")
             lines.append(f"    {cv['message']}")
@@ -1177,13 +1376,16 @@ def generate_summary_report(analysis: Dict[str, Any], patient_info: Optional[Dic
     
     # Abnormalities by panel
     panels = analysis.get("panels", {})
+    abnormal_panels_found = False
     for panel_name, panel_params in sorted(panels.items()):
-        panel_abnorms = [p for p in panel_params.values() if p.get("classification", {}).get("status") not in ("normal", "unknown", "text_value")]
+        panel_abnorms = [p for p in panel_params.values() 
+                        if p.get("classification", {}).get("status") not in ("normal", "unknown", "text_value")]
         if not panel_abnorms:
             continue
         
+        abnormal_panels_found = True
         lines.append(f"{panel_name.replace('_', ' ').upper()}")
-        lines.append("-" * 70)
+        lines.append("-" * 80)
         for param_name, param_data in sorted(panel_params.items()):
             status = param_data.get("classification", {}).get("status")
             if status in ("normal", "unknown", "text_value"):
@@ -1202,26 +1404,31 @@ def generate_summary_report(analysis: Dict[str, Any], patient_info: Optional[Dic
             if diff and diff.get("conditions"):
                 lines.append(f"    Consider:")
                 for cond in diff["conditions"][:3]:
-                    lines.append(f"      • {cond.get('name', 'Unknown')} - {cond.get('note', '')}")
+                    lines.append(f"      • {cond.get('name', 'Unknown')}")
+                    lines.append(f"        {cond.get('note', '')}")
             lines.append("")
+    
+    if not abnormal_panels_found:
+        lines.append("ALL PARAMETERS WITHIN NORMAL LIMITS")
+        lines.append("")
     
     # Recommendations
     recommendations = get_clinical_recommendations(analysis)
     if recommendations:
         lines.append("CLINICAL RECOMMENDATIONS")
-        lines.append("-" * 70)
-        for rec in recommendations[:5]:
+        lines.append("-" * 80)
+        for rec in recommendations[:8]:
             priority_mark = "🔴 " if rec["priority"] == "high" else "🟡 " if rec["priority"] == "medium" else "🟢 "
             lines.append(f"  {priority_mark}[{rec['priority'].upper()}] {rec['category']}")
             lines.append(f"     {rec['recommendation']}")
         lines.append("")
     
     # Footer
-    lines.append("=" * 70)
+    lines.append("=" * 80)
     lines.append(f"Report generated: {summary.get('analysis_date', 'Unknown')}")
     lines.append("DISCLAIMER: This is an AI-assisted analysis tool for educational purposes.")
     lines.append("Always consult with a qualified healthcare provider for clinical decisions.")
-    lines.append("=" * 70)
+    lines.append("=" * 80)
     
     return "\n".join(lines)
 
@@ -1247,6 +1454,8 @@ def export_to_csv_flat(analysis: Dict[str, Any]) -> str:
         status = classification.get("status", "")
         message = classification.get("message", "")
         
+        # Escape quotes in CSV
+        message = str(message).replace('"', '""')
         lines.append(f'"{param_name}","{value}","{unit}","{panel}","{status}","{message}"')
     
     return "\n".join(lines)
