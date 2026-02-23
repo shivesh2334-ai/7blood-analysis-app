@@ -1,832 +1,1208 @@
 """
-Hematology Analysis Engine
-Provides comprehensive analysis of CBC parameters with differential diagnoses.
+analysis_engine.py — Comprehensive Clinical Analysis Engine
+============================================================
+Provides multi-panel clinical analysis with:
+
+  • Reference range validation & clinical classification
+  • Differential diagnosis suggestions
+  • Sample quality assessment (Rule of Threes, consistency checks)
+  • Calculated indices (Mentzer, NLR, ratios, etc.)
+  • Panel-specific insights (CBC, LFT, KFT, LIPID, etc.)
+  • Critical value alerts
+  • Clinical recommendations
+  • Severity assessment & flagging system
+
+Public API
+----------
+  analyze_all_parameters(params, patient_info)      → comprehensive analysis
+  get_reference_range(param, sex)                   → ref_low, ref_high, unit
+  classify_value(param, value, sex)                 → {status, message, color, ...}
+  check_sample_quality(params)                      → [quality_issues]
+  calculate_indices(params)                         → {calculated_field: result}
+  get_differential_diagnosis(param, status)         → [differential_conditions]
+  get_clinical_recommendations(analysis)            → [recommendations]
+  generate_summary_report(analysis, patient_info)   → formatted_text
 """
 
-from typing import Dict, List, Optional, Tuple
+from __future__ import annotations
+from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+import json
 
+# ============================================================================
+# COMPREHENSIVE REFERENCE RANGES BY PARAMETER & SEX
+# ============================================================================
 
-# Reference ranges for adults
 REFERENCE_RANGES = {
-    'RBC': {
-        'Male': {'low': 4.5, 'high': 5.5, 'unit': 'x10^12/L', 'critical_low': 2.0, 'critical_high': 8.0},
-        'Female': {'low': 4.0, 'high': 5.0, 'unit': 'x10^12/L', 'critical_low': 2.0, 'critical_high': 8.0},
-        'Default': {'low': 4.0, 'high': 5.5, 'unit': 'x10^12/L', 'critical_low': 2.0, 'critical_high': 8.0}
+    # ────────────────────────────────────────────────────────────────────
+    # CBC Parameters
+    # ────────────────────────────────────────────────────────────────────
+    "RBC": {
+        "Male":    {"low": 4.5, "high": 5.9, "unit": "×10¹²/L", "critical_low": 2.0, "critical_high": 8.0},
+        "Female":  {"low": 4.1, "high": 5.1, "unit": "×10¹²/L", "critical_low": 2.0, "critical_high": 8.0},
+        "Default": {"low": 4.1, "high": 5.9, "unit": "×10¹²/L", "critical_low": 2.0, "critical_high": 8.0},
     },
-    'Hemoglobin': {
-        'Male': {'low': 13.5, 'high': 17.5, 'unit': 'g/dL', 'critical_low': 7.0, 'critical_high': 20.0},
-        'Female': {'low': 12.0, 'high': 16.0, 'unit': 'g/dL', 'critical_low': 7.0, 'critical_high': 20.0},
-        'Default': {'low': 12.0, 'high': 17.5, 'unit': 'g/dL', 'critical_low': 7.0, 'critical_high': 20.0}
+    "Hemoglobin": {
+        "Male":    {"low": 13.5, "high": 17.5, "unit": "g/dL", "critical_low": 5.0, "critical_high": 20.0},
+        "Female":  {"low": 12.0, "high": 15.5, "unit": "g/dL", "critical_low": 5.0, "critical_high": 20.0},
+        "Default": {"low": 12.0, "high": 17.5, "unit": "g/dL", "critical_low": 5.0, "critical_high": 20.0},
     },
-    'Hematocrit': {
-        'Male': {'low': 38.3, 'high': 48.6, 'unit': '%', 'critical_low': 20.0, 'critical_high': 60.0},
-        'Female': {'low': 35.5, 'high': 44.9, 'unit': '%', 'critical_low': 20.0, 'critical_high': 60.0},
-        'Default': {'low': 35.5, 'high': 48.6, 'unit': '%', 'critical_low': 20.0, 'critical_high': 60.0}
+    "Hematocrit": {
+        "Male":    {"low": 38.8, "high": 50.0, "unit": "%", "critical_low": 15.0, "critical_high": 60.0},
+        "Female":  {"low": 34.9, "high": 44.5, "unit": "%", "critical_low": 15.0, "critical_high": 60.0},
+        "Default": {"low": 34.9, "high": 50.0, "unit": "%", "critical_low": 15.0, "critical_high": 60.0},
     },
-    'MCV': {
-        'Default': {'low': 80.0, 'high': 100.0, 'unit': 'fL', 'critical_low': 50.0, 'critical_high': 130.0}
+    "MCV": {
+        "Default": {"low": 80, "high": 100, "unit": "fL", "critical_low": 40, "critical_high": 150},
     },
-    'MCH': {
-        'Default': {'low': 27.0, 'high': 33.0, 'unit': 'pg', 'critical_low': 15.0, 'critical_high': 45.0}
+    "MCH": {
+        "Default": {"low": 27, "high": 33, "unit": "pg", "critical_low": 10, "critical_high": 50},
     },
-    'MCHC': {
-        'Default': {'low': 32.0, 'high': 36.0, 'unit': 'g/dL', 'critical_low': 25.0, 'critical_high': 40.0}
+    "MCHC": {
+        "Default": {"low": 32, "high": 36, "unit": "g/dL", "critical_low": 20, "critical_high": 50},
     },
-    'RDW': {
-        'Default': {'low': 11.5, 'high': 14.5, 'unit': '%', 'critical_low': 8.0, 'critical_high': 30.0}
+    "RDW_CV": {
+        "Default": {"low": 11.5, "high": 14.5, "unit": "%", "critical_low": 5, "critical_high": 30},
     },
-    'RDW_SD': {
-        'Default': {'low': 35.0, 'high': 56.0, 'unit': 'fL', 'critical_low': 25.0, 'critical_high': 80.0}
+    "WBC": {
+        "Default": {"low": 4.5, "high": 11.0, "unit": "×10⁹/L", "critical_low": 0.5, "critical_high": 100},
     },
-    'WBC': {
-        'Default': {'low': 4.0, 'high': 11.0, 'unit': 'x10^9/L', 'critical_low': 1.0, 'critical_high': 30.0}
+    "Neutrophils": {
+        "Default": {"low": 45, "high": 74, "unit": "%", "critical_low": 0, "critical_high": 100},
     },
-    'Neutrophils': {
-        'Default': {'low': 40.0, 'high': 70.0, 'unit': '%', 'critical_low': 5.0, 'critical_high': 95.0}
+    "Lymphocytes": {
+        "Default": {"low": 17, "high": 48, "unit": "%", "critical_low": 0, "critical_high": 100},
     },
-    'Lymphocytes': {
-        'Default': {'low': 20.0, 'high': 40.0, 'unit': '%', 'critical_low': 3.0, 'critical_high': 80.0}
+    "Monocytes": {
+        "Default": {"low": 2, "high": 11, "unit": "%", "critical_low": 0, "critical_high": 100},
     },
-    'Monocytes': {
-        'Default': {'low': 2.0, 'high': 8.0, 'unit': '%', 'critical_low': 0.0, 'critical_high': 25.0}
+    "Eosinophils": {
+        "Default": {"low": 0, "high": 4, "unit": "%", "critical_low": 0, "critical_high": 100},
     },
-    'Eosinophils': {
-        'Default': {'low': 1.0, 'high': 4.0, 'unit': '%', 'critical_low': 0.0, 'critical_high': 30.0}
+    "Basophils": {
+        "Default": {"low": 0, "high": 2, "unit": "%", "critical_low": 0, "critical_high": 100},
     },
-    'Basophils': {
-        'Default': {'low': 0.0, 'high': 1.0, 'unit': '%', 'critical_low': 0.0, 'critical_high': 10.0}
+    "ANC": {
+        "Default": {"low": 2.0, "high": 7.5, "unit": "×10⁹/L", "critical_low": 0.5, "critical_high": 100},
     },
-    'Platelets': {
-        'Default': {'low': 150.0, 'high': 400.0, 'unit': 'x10^9/L', 'critical_low': 20.0, 'critical_high': 1000.0}
+    "ALC": {
+        "Default": {"low": 1.0, "high": 4.8, "unit": "×10⁹/L", "critical_low": 0.2, "critical_high": 50},
     },
-    'MPV': {
-        'Default': {'low': 7.5, 'high': 12.5, 'unit': 'fL', 'critical_low': 5.0, 'critical_high': 15.0}
+    "Platelets": {
+        "Default": {"low": 150, "high": 400, "unit": "×10⁹/L", "critical_low": 20, "critical_high": 1000},
     },
-    'PDW': {
-        'Default': {'low': 9.0, 'high': 17.0, 'unit': 'fL', 'critical_low': 5.0, 'critical_high': 25.0}
+    "MPV": {
+        "Default": {"low": 7.4, "high": 10.4, "unit": "fL", "critical_low": 3, "critical_high": 20},
     },
-    'Reticulocytes': {
-        'Default': {'low': 0.5, 'high': 2.5, 'unit': '%', 'critical_low': 0.0, 'critical_high': 15.0}
+    "ESR": {
+        "Male":    {"low": 0, "high": 15, "unit": "mm/hr", "critical_low": 0, "critical_high": 100},
+        "Female":  {"low": 0, "high": 20, "unit": "mm/hr", "critical_low": 0, "critical_high": 100},
+        "Default": {"low": 0, "high": 20, "unit": "mm/hr", "critical_low": 0, "critical_high": 100},
     },
-    'ESR': {
-        'Male': {'low': 0.0, 'high': 15.0, 'unit': 'mm/hr', 'critical_low': 0.0, 'critical_high': 100.0},
-        'Female': {'low': 0.0, 'high': 20.0, 'unit': 'mm/hr', 'critical_low': 0.0, 'critical_high': 100.0},
-        'Default': {'low': 0.0, 'high': 20.0, 'unit': 'mm/hr', 'critical_low': 0.0, 'critical_high': 100.0}
+
+    # ────────────────────────────────────────────────────────────────────
+    # LFT Parameters
+    # ────────────────────────────────────────────────────────────────────
+    "ALT": {
+        "Male":    {"low": 7, "high": 56, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
+        "Female":  {"low": 7, "high": 45, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
+        "Default": {"low": 7, "high": 56, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
     },
-    'ANC': {
-        'Default': {'low': 1.5, 'high': 8.0, 'unit': 'x10^9/L', 'critical_low': 0.5, 'critical_high': 20.0}
+    "AST": {
+        "Male":    {"low": 10, "high": 40, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
+        "Female":  {"low": 7, "high": 35, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
+        "Default": {"low": 7, "high": 40, "unit": "IU/L", "critical_low": 0, "critical_high": 10000},
     },
-    'ALC': {
-        'Default': {'low': 1.0, 'high': 4.0, 'unit': 'x10^9/L', 'critical_low': 0.2, 'critical_high': 15.0}
+    "ALP": {
+        "Default": {"low": 30, "high": 120, "unit": "IU/L", "critical_low": 0, "critical_high": 1000},
+    },
+    "GGT": {
+        "Male":    {"low": 0, "high": 65, "unit": "IU/L", "critical_low": 0, "critical_high": 1000},
+        "Female":  {"low": 0, "high": 36, "unit": "IU/L", "critical_low": 0, "critical_high": 1000},
+        "Default": {"low": 0, "high": 65, "unit": "IU/L", "critical_low": 0, "critical_high": 1000},
+    },
+    "Total_Bilirubin": {
+        "Default": {"low": 0.2, "high": 1.3, "unit": "mg/dL", "critical_low": 0, "critical_high": 50},
+    },
+    "Direct_Bilirubin": {
+        "Default": {"low": 0.0, "high": 0.3, "unit": "mg/dL", "critical_low": 0, "critical_high": 30},
+    },
+    "Total_Protein": {
+        "Default": {"low": 6.0, "high": 8.3, "unit": "g/dL", "critical_low": 2.0, "critical_high": 15.0},
+    },
+    "Albumin": {
+        "Default": {"low": 3.5, "high": 5.0, "unit": "g/dL", "critical_low": 1.0, "critical_high": 10.0},
+    },
+
+    # ────────────────────────────────────────────────────────────────────
+    # KFT Parameters
+    # ────────────────────────────────────────────────────────────────────
+    "Serum_Creatinine": {
+        "Male":    {"low": 0.7, "high": 1.3, "unit": "mg/dL", "critical_low": 0.1, "critical_high": 30.0},
+        "Female":  {"low": 0.6, "high": 1.1, "unit": "mg/dL", "critical_low": 0.1, "critical_high": 30.0},
+        "Default": {"low": 0.6, "high": 1.3, "unit": "mg/dL", "critical_low": 0.1, "critical_high": 30.0},
+    },
+    "BUN": {
+        "Default": {"low": 7, "high": 20, "unit": "mg/dL", "critical_low": 0, "critical_high": 200},
+    },
+    "Serum_Urea": {
+        "Default": {"low": 15, "high": 45, "unit": "mg/dL", "critical_low": 0, "critical_high": 500},
+    },
+    "Serum_Sodium": {
+        "Default": {"low": 136, "high": 145, "unit": "mEq/L", "critical_low": 110, "critical_high": 170},
+    },
+    "Serum_Potassium": {
+        "Default": {"low": 3.5, "high": 5.0, "unit": "mEq/L", "critical_low": 2.5, "critical_high": 7.0},
+    },
+    "Serum_Chloride": {
+        "Default": {"low": 98, "high": 107, "unit": "mEq/L", "critical_low": 80, "critical_high": 120},
+    },
+    "Serum_Calcium": {
+        "Default": {"low": 8.5, "high": 10.2, "unit": "mg/dL", "critical_low": 6.0, "critical_high": 14.0},
+    },
+    "Serum_Phosphorus": {
+        "Default": {"low": 2.5, "high": 4.5, "unit": "mg/dL", "critical_low": 1.0, "critical_high": 15.0},
+    },
+    "eGFR": {
+        "Default": {"low": 60, "high": 999, "unit": "mL/min/1.73m²", "critical_low": 0, "critical_high": 200},
+    },
+
+    # ────────────────────────────────────────────────────────────────────
+    # Lipid Profile
+    # ────────────────────────────────────────────────────────────────────
+    "Total_Cholesterol": {
+        "Default": {"low": 0, "high": 200, "unit": "mg/dL", "optimal": 200, "borderline": 240, "critical_high": 500},
+    },
+    "HDL_Cholesterol": {
+        "Default": {"low": 40, "high": 999, "unit": "mg/dL", "optimal": 60, "critical_low": 20},
+    },
+    "LDL_Cholesterol": {
+        "Default": {"low": 0, "high": 100, "unit": "mg/dL", "optimal": 100, "critical_high": 500},
+    },
+    "Triglycerides": {
+        "Default": {"low": 0, "high": 150, "unit": "mg/dL", "critical_high": 1000},
+    },
+
+    # ────────────────────────────────────────────────────────────────────
+    # Diabetes Parameters
+    # ────────────────────────────────────────────────────────────────────
+    "Fasting_Blood_Glucose": {
+        "Default": {"low": 70, "high": 100, "unit": "mg/dL", "critical_low": 40, "critical_high": 600},
+    },
+    "HbA1c": {
+        "Default": {"low": 0, "high": 5.7, "unit": "%", "critical_high": 15},
+    },
+    "Random_Blood_Glucose": {
+        "Default": {"low": 70, "high": 140, "unit": "mg/dL", "critical_low": 40, "critical_high": 600},
+    },
+
+    # ────────────────────────────────────────────────────────────────────
+    # Thyroid Function
+    # ────────────────────────────────────────────────────────────────────
+    "TSH": {
+        "Default": {"low": 0.4, "high": 4.0, "unit": "µIU/mL", "critical_low": 0, "critical_high": 100},
+    },
+    "Free_T4": {
+        "Default": {"low": 0.8, "high": 1.8, "unit": "ng/dL", "critical_low": 0, "critical_high": 5},
+    },
+    "Total_T3": {
+        "Default": {"low": 80, "high": 200, "unit": "ng/dL", "critical_low": 20, "critical_high": 500},
+    },
+
+    # ────────────────────────────────────────────────────────────────────
+    # Vitamin & Mineral Parameters
+    # ────────────────────────────────────────────────────────────────────
+    "Vitamin_D_25OH": {
+        "Default": {"low": 30, "high": 100, "unit": "ng/mL", "deficient": 20, "insufficient": 29},
+    },
+    "Vitamin_B12": {
+        "Default": {"low": 200, "high": 900, "unit": "pg/mL", "critical_low": 100},
+    },
+    "Serum_Folate": {
+        "Default": {"low": 5.4, "high": 16, "unit": "ng/mL", "critical_low": 2},
+    },
+
+    # ────────────────────────────────────────────────────────────────────
+    # Rheumatology & Inflammation
+    # ────────────────────────────────────────────────────────────────────
+    "CRP": {
+        "Default": {"low": 0, "high": 3.0, "unit": "mg/L", "critical_high": 100},
+    },
+    "hs_CRP": {
+        "Default": {"low": 0, "high": 1.0, "unit": "mg/L", "critical_high": 50},
+    },
+    "RA_Factor": {
+        "Default": {"low": 0, "high": 14, "unit": "IU/mL", "critical_high": 500},
+    },
+
+    # ───────────────────────────────────────────────────────��────────────
+    # Oncology Markers
+    # ────────────────────────────────────────────────────────────────────
+    "PSA_Total": {
+        "Default": {"low": 0, "high": 4.0, "unit": "ng/mL", "borderline": 4.0, "critical_high": 100},
+    },
+    "CEA": {
+        "Default": {"low": 0, "high": 2.5, "unit": "ng/mL", "critical_high": 50},
+    },
+    "CA_125": {
+        "Default": {"low": 0, "high": 35, "unit": "U/mL", "critical_high": 1000},
+    },
+    "AFP": {
+        "Default": {"low": 0, "high": 10, "unit": "ng/mL", "critical_high": 10000},
     },
 }
 
-# =============================================
-# DIFFERENTIAL DIAGNOSIS DATABASE
-# =============================================
+
+# ============================================================================
+# DIFFERENTIAL DIAGNOSES BY PARAMETER
+# ============================================================================
+
 DIFFERENTIAL_DIAGNOSES = {
-    'RBC': {
-        'low': {
-            'title': 'Decreased RBC Count (Anemia)',
-            'differentials': [
-                {'condition': 'Iron Deficiency Anemia',
-                 'discussion': 'Most common cause worldwide. Microcytic, hypochromic RBCs. Low MCV, MCH, MCHC, elevated RDW. Check ferritin and iron studies.'},
-                {'condition': 'Vitamin B12/Folate Deficiency',
-                 'discussion': 'Megaloblastic anemia with high MCV. Hypersegmented neutrophils. Check B12, folate, methylmalonic acid.'},
-                {'condition': 'Anemia of Chronic Disease (ACD/AI)',
-                 'discussion': 'Second most common. Usually normocytic. Ferritin normal/elevated. Low serum iron, low TIBC.'},
-                {'condition': 'Hemolytic Anemia',
-                 'discussion': 'Premature RBC destruction. Elevated reticulocytes, LDH, indirect bilirubin. Low haptoglobin.'},
-                {'condition': 'Aplastic Anemia',
-                 'discussion': 'Bone marrow failure with pancytopenia. Low reticulocyte count. Requires bone marrow biopsy.'},
-                {'condition': 'Thalassemia',
-                 'discussion': 'Inherited globin synthesis disorder. Microcytic with relatively high RBC count. Hemoglobin electrophoresis diagnostic.'},
-                {'condition': 'Chronic Kidney Disease',
-                 'discussion': 'Decreased erythropoietin production. Usually normocytic. Check renal function.'},
-                {'condition': 'Myelodysplastic Syndrome (MDS)',
-                 'discussion': 'Clonal disorder with ineffective hematopoiesis. Often macrocytic. Bone marrow biopsy required.'}
-            ]
+    "Hemoglobin": {
+        "low": {
+            "title": "Anemia (Low Hemoglobin)",
+            "conditions": [
+                {"name": "Iron Deficiency Anemia", "prevalence": "Most common", "note": "Check ferritin, iron saturation, TIBC. Low MCV, low MCH typical."},
+                {"name": "Vitamin B12 Deficiency", "prevalence": "Common in vegans/elderly", "note": "Check B12, folate, homocysteine. Macrocytic anemia."},
+                {"name": "Folate Deficiency", "prevalence": "Common in alcoholics", "note": "Check serum/RBC folate. Macrocytic anemia."},
+                {"name": "Chronic Kidney Disease", "prevalence": "Common in advanced CKD", "note": "Erythropoietin deficiency. Check creatinine, eGFR."},
+                {"name": "Hemolytic Anemia", "prevalence": "Various causes", "note": "Check bilirubin, LDH, reticulocyte count, direct Coombs."},
+                {"name": "Bone Marrow Disorders", "prevalence": "Serious", "note": "Leukemia, aplastic anemia, myelodysplasia. Check WBC, platelets."},
+                {"name": "Acute Hemorrhage", "prevalence": "Clinical context", "note": "Recent bleeding event. Watch for clinical signs."},
+            ],
         },
-        'high': {
-            'title': 'Elevated RBC Count (Erythrocytosis/Polycythemia)',
-            'differentials': [
-                {'condition': 'Polycythemia Vera',
-                 'discussion': 'Myeloproliferative neoplasm. JAK2 V617F mutation in ~95%. Risk of thrombosis.'},
-                {'condition': 'Secondary Polycythemia',
-                 'discussion': 'Reactive from chronic hypoxia (COPD, sleep apnea, high altitude), EPO-secreting tumors.'},
-                {'condition': 'Dehydration',
-                 'discussion': 'Decreased plasma volume causes apparent increase. Resolves with hydration.'},
-                {'condition': 'Thalassemia Trait',
-                 'discussion': 'Elevated RBC with low MCV and low-normal Hb. Mentzer index (MCV/RBC) <13.'}
-            ]
-        }
-    },
-    'Hemoglobin': {
-        'low': {
-            'title': 'Low Hemoglobin (Anemia)',
-            'differentials': [
-                {'condition': 'Iron Deficiency Anemia',
-                 'discussion': 'Most common cause globally. Fatigue, pallor, dyspnea. Check ferritin, iron studies.'},
-                {'condition': 'Hemorrhage (Acute or Chronic)',
-                 'discussion': 'Acute blood loss dilutional effect takes 24-48 hrs. Chronic loss causes iron deficiency.'},
-                {'condition': 'Hemoglobinopathies',
-                 'discussion': 'Sickle cell, thalassemias. Hemoglobin electrophoresis or HPLC diagnostic.'},
-                {'condition': 'Bone Marrow Infiltration',
-                 'discussion': 'Leukemia, lymphoma, metastatic cancer. Leukoerythroblastic picture on smear.'}
-            ]
+        "high": {
+            "title": "Elevated Hemoglobin (Polycythemia)",
+            "conditions": [
+                {"name": "Polycythemia Vera", "prevalence": "Hematologic malignancy", "note": "JAK2 V617F mutation. Check WBC, platelets for myeloproliferation."},
+                {"name": "Chronic Hypoxia", "prevalence": "Chronic lung/heart disease", "note": "Physiologic compensation for low O2. Check clinical history."},
+                {"name": "Erythropoietin-Secreting Tumors", "prevalence": "Renal cancer, hemangioma", "note": "Paraneoplastic syndrome. Check kidney imaging."},
+                {"name": "Dehydration", "prevalence": "Hemoconcentration", "note": "Apparent increase in Hb. Check BUN/Cr ratio, clinical state."},
+                {"name": "High Altitude", "prevalence": "Normal adaptive response", "note": "Chronic hypoxia stimulates EPO. Expected at elevation."},
+            ],
         },
-        'high': {
-            'title': 'Elevated Hemoglobin',
-            'differentials': [
-                {'condition': 'Polycythemia Vera',
-                 'discussion': 'Hb >16.5 g/dL (men) or >16.0 g/dL (women) is major criterion.'},
-                {'condition': 'Chronic Hypoxia',
-                 'discussion': 'Compensatory from COPD, heart disease, sleep apnea, high altitude.'},
-                {'condition': 'Dehydration',
-                 'discussion': 'Hemoconcentration from volume depletion. Corrects with hydration.'},
-                {'condition': 'Spurious (Lipemia/High WBC)',
-                 'discussion': 'Very high WBC, lipemia, or monoclonal proteins cause turbidity artifact.'}
-            ]
-        }
     },
-    'MCV': {
-        'low': {
-            'title': 'Microcytosis (Low MCV)',
-            'differentials': [
-                {'condition': 'Iron Deficiency Anemia',
-                 'discussion': 'Most common cause. Low MCV with elevated RDW.'},
-                {'condition': 'Thalassemia Trait',
-                 'discussion': 'Low MCV with normal/slightly elevated RDW. RBC count often normal/elevated. Mentzer index <13.'},
-                {'condition': 'Anemia of Chronic Disease',
-                 'discussion': 'Usually normocytic but can be microcytic in ~30%. Ferritin normal/elevated.'},
-                {'condition': 'Sideroblastic Anemia',
-                 'discussion': 'Congenital or acquired. Ring sideroblasts on bone marrow iron stain.'},
-                {'condition': 'Lead Poisoning',
-                 'discussion': 'Inhibits heme synthesis. Basophilic stippling. Check blood lead level.'}
-            ]
+    "WBC": {
+        "low": {
+            "title": "Leukopenia (Low WBC)",
+            "conditions": [
+                {"name": "Bone Marrow Suppression", "prevalence": "Common", "note": "Medications, chemotherapy, radiation. Check medications list."},
+                {"name": "Infection/Sepsis", "prevalence": "Critical", "note": "Overwhelming bacterial infection depletes WBC. Clinical signs of infection?"},
+                {"name": "Aplastic Anemia", "prevalence": "Serious", "note": "Pancytopenia (low RBC, WBC, platelets). Bone marrow biopsy definitive."},
+                {"name": "SLE or Other Autoimmune", "prevalence": "Immune-mediated", "note": "Check ANA, anti-dsDNA, complement levels."},
+                {"name": "HIV/AIDS", "prevalence": "Immunosuppression", "note": "CD4 count typically low. Check HIV status."},
+                {"name": "Medication-Induced", "prevalence": "Common", "note": "NSAIDs, antibiotics, immunosuppressants, chemotherapy."},
+            ],
         },
-        'high': {
-            'title': 'Macrocytosis (High MCV)',
-            'differentials': [
-                {'condition': 'Vitamin B12 Deficiency',
-                 'discussion': 'Megaloblastic anemia, MCV often >110 fL. Hypersegmented neutrophils.'},
-                {'condition': 'Folate Deficiency',
-                 'discussion': 'Similar to B12 without neurological features. Alcoholism, poor diet, medications.'},
-                {'condition': 'Myelodysplastic Syndrome',
-                 'discussion': 'Clonal disorder with dysplastic morphology. Common cause in elderly.'},
-                {'condition': 'Alcoholism/Liver Disease',
-                 'discussion': 'Direct toxic effect or folate deficiency or altered lipid metabolism.'},
-                {'condition': 'Hypothyroidism',
-                 'discussion': 'Mild macrocytosis. Check TSH and free T4.'},
-                {'condition': 'Reticulocytosis',
-                 'discussion': 'Reticulocytes are larger than mature RBCs. Check reticulocyte count.'},
-                {'condition': 'Medications',
-                 'discussion': 'Hydroxyurea, methotrexate, azathioprine, zidovudine.'}
-            ]
-        }
-    },
-    'MCHC': {
-        'low': {
-            'title': 'Low MCHC (Hypochromia)',
-            'differentials': [
-                {'condition': 'Iron Deficiency Anemia', 'discussion': 'Most common cause. Decreased hemoglobin synthesis.'},
-                {'condition': 'Thalassemia', 'discussion': 'Decreased globin chain synthesis.'},
-                {'condition': 'Sideroblastic Anemia', 'discussion': 'Impaired heme synthesis.'}
-            ]
+        "high": {
+            "title": "Leukocytosis (High WBC)",
+            "conditions": [
+                {"name": "Infection/Pneumonia", "prevalence": "Most common", "note": "Bacterial, viral, or fungal. Check neutrophil %, clinical signs."},
+                {"name": "Leukemia", "prevalence": "Hematologic malignancy", "note": "Acute or chronic. High WBC + blasts. Check smear, LDH."},
+                {"name": "Leukemoid Reaction", "prevalence": "Reactive", "note": "Extreme elevation (>50K) in response to severe infection/inflammation."},
+                {"name": "Chronic Myeloproliferative", "prevalence": "Hematologic", "note": "CML, polycythemia vera, myelofibrosis. JAK2 mutation studies."},
+                {"name": "Medications", "prevalence": "Steroids, catecholamines", "note": "Epinephrine, corticosteroids cause release from marginal pool."},
+                {"name": "Smoking", "prevalence": "Common habit effect", "note": "Chronic smokers have persistently elevated WBC. Reversible with cessation."},
+                {"name": "Malignancy", "prevalence": "Paraneoplastic", "note": "Lung, kidney cancers can elevate WBC. Check imaging."},
+            ],
         },
-        'high': {
-            'title': 'High MCHC',
-            'differentials': [
-                {'condition': 'Hereditary Spherocytosis',
-                 'discussion': 'RBC membrane defect. MCHC truly elevated >36 g/dL. EMA binding test diagnostic.'},
-                {'condition': 'Cold Agglutinin Disease',
-                 'discussion': 'Spurious from RBC agglutination. Warming sample to 37C resolves.'},
-                {'condition': 'Severe Lipemia',
-                 'discussion': 'Turbidity falsely elevates hemoglobin measurement.'},
-                {'condition': 'Hemoglobin C Disease',
-                 'discussion': 'RBC dehydration from Hb C crystals. Target cells on smear.'}
-            ]
-        }
     },
-    'RDW': {
-        'high': {
-            'title': 'Elevated RDW (Anisocytosis)',
-            'differentials': [
-                {'condition': 'Iron Deficiency Anemia', 'discussion': 'Early finding. Mixed normocytic and microcytic cells.'},
-                {'condition': 'B12/Folate Deficiency', 'discussion': 'Mixed population of macrocytes and normocytes.'},
-                {'condition': 'Myelodysplastic Syndrome', 'discussion': 'Dysplastic erythropoiesis with variable cell sizes.'},
-                {'condition': 'Post-Transfusion', 'discussion': 'Transfused RBCs differ in size from patient cells.'},
-                {'condition': 'Mixed Nutritional Deficiency', 'discussion': 'Combined iron and B12/folate deficiency.'},
-                {'condition': 'Hemoglobinopathies', 'discussion': 'Variable RBC shapes and sizes.'}
-            ]
-        }
-    },
-    'WBC': {
-        'low': {
-            'title': 'Leukopenia (Low WBC)',
-            'differentials': [
-                {'condition': 'Neutropenia', 'discussion': 'Most common cause. Viral infections, drugs, autoimmune, marrow failure.'},
-                {'condition': 'Viral Infections', 'discussion': 'HIV, hepatitis, EBV, CMV, influenza cause transient leukopenia.'},
-                {'condition': 'Aplastic Anemia', 'discussion': 'Pancytopenia with hypocellular bone marrow.'},
-                {'condition': 'Drug-Induced', 'discussion': 'Chemotherapy, clozapine, carbamazepine, methimazole, sulfonamides.'},
-                {'condition': 'Autoimmune', 'discussion': 'SLE, rheumatoid arthritis can cause neutropenia or lymphopenia.'},
-                {'condition': 'Hypersplenism', 'discussion': 'Splenomegaly sequesters WBCs.'}
-            ]
+    "Platelets": {
+        "low": {
+            "title": "Thrombocytopenia (Low Platelets)",
+            "conditions": [
+                {"name": "Immune Thrombocytopenia (ITP)", "prevalence": "Most common acquired", "note": "Autoimmune destruction. Often 10-50K range. Check for splenomegaly."},
+                {"name": "Drug-Induced", "prevalence": "Common", "note": "NSAIDs, sulfonamides, statins, anticonvulsants. Discontinue if possible."},
+                {"name": "Bone Marrow Disorders", "prevalence": "Serious", "note": "Aplastic anemia, MDS, leukemia. Pancytopenia pattern."},
+                {"name": "TTP/HUS", "prevalence": "Thrombotic microangiopathy", "note": "Microangiopathic hemolytic anemia. High LDH, high creatinine."},
+                {"name": "DIC", "prevalence": "Disseminated Intravascular Coagulation", "note": "Critical. Prolonged PT/INR, low fibrinogen. Severe illness context."},
+                {"name": "Splenomegaly", "prevalence": "Sequestration", "note": "Portal hypertension, lymphoma. Physical exam critical."},
+                {"name": "Sepsis", "prevalence": "Critical illness", "note": "Severe infection causes consumptive thrombocytopenia."},
+            ],
         },
-        'high': {
-            'title': 'Leukocytosis (High WBC)',
-            'differentials': [
-                {'condition': 'Bacterial Infection', 'discussion': 'Most common cause. Left shift, toxic granulation, Dohle bodies.'},
-                {'condition': 'Stress/Physiologic', 'discussion': 'Catecholamine demargination of neutrophils.'},
-                {'condition': 'Corticosteroid Use', 'discussion': 'Demargination and decreased migration to tissues.'},
-                {'condition': 'Chronic Myeloid Leukemia (CML)', 'discussion': 'Full myeloid maturation spectrum. Basophilia. BCR-ABL1.'},
-                {'condition': 'Acute Leukemia', 'discussion': 'Can present with very high WBC with circulating blasts.'},
-                {'condition': 'Smoking', 'discussion': 'Chronic mild neutrophilic leukocytosis.'}
-            ]
-        }
-    },
-    'Platelets': {
-        'low': {
-            'title': 'Thrombocytopenia (Low Platelets)',
-            'differentials': [
-                {'condition': 'Immune Thrombocytopenia (ITP)', 'discussion': 'Autoimmune destruction. Diagnosis of exclusion. Large platelets on smear.'},
-                {'condition': 'Pseudothrombocytopenia', 'discussion': 'EDTA-induced clumping. Check smear. Repeat with citrate tube.'},
-                {'condition': 'DIC', 'discussion': 'Consumptive coagulopathy. Elevated PT/PTT, low fibrinogen, schistocytes.'},
-                {'condition': 'TTP/HUS', 'discussion': 'Microangiopathic hemolytic anemia. Schistocytes. ADAMTS13 for TTP.'},
-                {'condition': 'Bone Marrow Failure', 'discussion': 'Aplastic anemia, MDS, leukemia. Usually with other cytopenias.'},
-                {'condition': 'Drug-Induced', 'discussion': 'HIT, valproic acid, quinine, chemotherapy.'},
-                {'condition': 'Liver Disease/Hypersplenism', 'discussion': 'Portal hypertension with platelet sequestration.'}
-            ]
+        "high": {
+            "title": "Thrombocytosis (High Platelets)",
+            "conditions": [
+                {"name": "Essential Thrombocythemia", "prevalence": "Primary hematologic", "note": "Myeloproliferative. JAK2 V617F, CALR, MPL mutations. Elevated risk of thrombosis."},
+                {"name": "Polycythemia Vera", "prevalence": "Myeloproliferative", "note": "Often elevated Hb, WBC, platelets together. JAK2+."},
+                {"name": "Chronic Myeloid Leukemia", "prevalence": "Philadelphia chromosome+", "note": "BCR-ABL fusion. Extreme elevation possible."},
+                {"name": "Infection/Inflammation", "prevalence": "Reactive", "note": "Acute phase response. Reversible with treatment of underlying cause."},
+                {"name": "Iron Deficiency", "prevalence": "Reactive", "note": "Mild elevation common. Corrects with iron replacement."},
+                {"name": "Malignancy", "prevalence": "Paraneoplastic", "note": "Lung, gastric, ovarian cancers. Resolves with cancer treatment."},
+                {"name": "Post-Splenectomy", "prevalence": "Permanent elevation", "note": "Normal consequence of absent spleen. Watch for thrombosis risk."},
+            ],
         },
-        'high': {
-            'title': 'Thrombocytosis (High Platelets)',
-            'differentials': [
-                {'condition': 'Reactive Thrombocytosis', 'discussion': 'Most common (>80%). Infection, inflammation, iron deficiency, surgery.'},
-                {'condition': 'Essential Thrombocythemia', 'discussion': 'Myeloproliferative neoplasm. JAK2, CALR, or MPL mutations.'},
-                {'condition': 'Iron Deficiency', 'discussion': 'Reactive thrombocytosis. Normalizes with iron replacement.'},
-                {'condition': 'Post-Splenectomy', 'discussion': 'Loss of splenic sequestration.'}
-            ]
-        }
     },
-    'MPV': {
-        'low': {
-            'title': 'Low MPV (Small Platelets)',
-            'differentials': [
-                {'condition': 'Bone Marrow Suppression', 'discussion': 'Decreased megakaryopoiesis produces small platelets.'},
-                {'condition': 'Wiskott-Aldrich Syndrome', 'discussion': 'X-linked. Characteristically small platelets with thrombocytopenia.'},
-                {'condition': 'Hypersplenism', 'discussion': 'Spleen sequesters larger platelets.'}
-            ]
+    "Total_Cholesterol": {
+        "high": {
+            "title": "Hypercholesterolemia",
+            "conditions": [
+                {"name": "Primary Hyperlipidemia", "prevalence": "Genetic", "note": "Familial hypercholesterolemia. Check family history, LDL pattern."},
+                {"name": "Secondary to Metabolic Syndrome", "prevalence": "Common", "note": "Obesity, diabetes, sedentary. Elevates TC, TG, LDL; lowers HDL."},
+                {"name": "Hypothyroidism", "prevalence": "Treatable", "note": "Check TSH, free T4. Cholesterol improves with thyroid replacement."},
+                {"name": "Liver Disease", "prevalence": "Can be increased", "note": "Cirrhosis paradoxically lowers. Cholestasis may elevate."},
+                {"name": "Chronic Kidney Disease", "prevalence": "Progressive", "note": "Nephrotic syndrome has severe dyslipidemia. Check albumin, proteinuria."},
+            ],
         },
-        'high': {
-            'title': 'High MPV (Large Platelets)',
-            'differentials': [
-                {'condition': 'Immune Thrombocytopenia (ITP)', 'discussion': 'Compensatory large, young platelets.'},
-                {'condition': 'Inherited Platelet Disorders', 'discussion': 'Bernard-Soulier, Gray platelet syndrome, MYH9-related disease.'},
-                {'condition': 'EDTA Artifact', 'discussion': 'Prolonged EDTA exposure causes platelet swelling.'}
-            ]
-        }
     },
-    'Neutrophils': {
-        'low': {
-            'title': 'Neutropenia',
-            'differentials': [
-                {'condition': 'Drug-Induced', 'discussion': 'Chemotherapy, clozapine, carbamazepine, methimazole.'},
-                {'condition': 'Viral Infections', 'discussion': 'HIV, hepatitis, EBV, CMV, parvovirus B19.'},
-                {'condition': 'Autoimmune Neutropenia', 'discussion': 'Primary or secondary (SLE, Felty syndrome).'},
-                {'condition': 'Benign Ethnic Neutropenia', 'discussion': 'Common in African descent. ANC 1.0-1.5 without increased risk.'}
-            ]
+    "Serum_Creatinine": {
+        "high": {
+            "title": "Elevated Creatinine (Renal Dysfunction)",
+            "conditions": [
+                {"name": "Chronic Kidney Disease", "prevalence": "Progressive", "note": "Stages 1-5. Check eGFR, urinalysis, kidney imaging if new."},
+                {"name": "Acute Kidney Injury", "prevalence": "Acute", "note": "Sudden rise. Distinguish pre-renal, intrinsic, post-renal causes."},
+                {"name": "Dehydration", "prevalence": "Pre-renal", "note": "BUN/Cr >20 suggests pre-renal. Improves with hydration."},
+                {"name": "Hypertension", "prevalence": "Common cause of CKD", "note": "Chronic poorly controlled HTN damages kidneys. Check BP control."},
+                {"name": "Diabetes", "prevalence": "Most common cause globally", "note": "Diabetic nephropathy. Check glucose, HbA1c, proteinuria."},
+                {"name": "Glomerulonephritis", "prevalence": "Immune-mediated", "note": "Check urinalysis (RBC, casts), kidney biopsy if needed."},
+                {"name": "Muscle Disease", "prevalence": "High muscle mass", "note": "Athletes have higher baseline. Use eGFR/CKD-EPI for more accurate GFR."},
+            ],
         },
-        'high': {
-            'title': 'Neutrophilia',
-            'differentials': [
-                {'condition': 'Bacterial Infection', 'discussion': 'Most common. Left shift, toxic granulation.'},
-                {'condition': 'Corticosteroid Effect', 'discussion': 'Demargination from vessel walls.'},
-                {'condition': 'Myeloproliferative Neoplasms', 'discussion': 'CML with persistent neutrophilia and basophilia.'}
-            ]
-        }
     },
-    'Lymphocytes': {
-        'low': {
-            'title': 'Lymphopenia',
-            'differentials': [
-                {'condition': 'HIV/AIDS', 'discussion': 'CD4+ T cell depletion.'},
-                {'condition': 'Corticosteroid Use', 'discussion': 'Lymphocyte redistribution and apoptosis.'},
-                {'condition': 'Severe Infection/Sepsis', 'discussion': 'Lymphocyte apoptosis. Poor prognostic sign.'}
-            ]
+    "TSH": {
+        "high": {
+            "title": "Elevated TSH (Primary Hypothyroidism)",
+            "conditions": [
+                {"name": "Hashimoto's Thyroiditis", "prevalence": "Most common cause", "note": "Autoimmune. Check anti-TPO, anti-thyroglobulin. Fatigue, weight gain."},
+                {"name": "Iodine Deficiency", "prevalence": "Worldwide leading cause", "note": "Geographic areas with low iodine. Improvement with supplementation."},
+                {"name": "Hypothyroidism on Inadequate Levothyroxine", "prevalence": "Common compliance issue", "note": "Check dose, adherence. Repeat TSH 6-8 weeks after adjustment."},
+                {"name": "Central Hypothyroidism", "prevalence": "Secondary/tertiary", "note": "Low TSH + low free T4. Pituitary/hypothalamic disease. Check MRI if suspected."},
+            ],
         },
-        'high': {
-            'title': 'Lymphocytosis',
-            'differentials': [
-                {'condition': 'Viral Infections', 'discussion': 'EBV, CMV, hepatitis. Reactive lymphocytes on smear.'},
-                {'condition': 'Chronic Lymphocytic Leukemia (CLL)', 'discussion': 'Mature lymphocytes >5 x10^9/L. Smudge cells.'},
-                {'condition': 'Pertussis', 'discussion': 'Marked lymphocytosis especially in children.'}
-            ]
-        }
-    },
-    'Eosinophils': {
-        'high': {
-            'title': 'Eosinophilia',
-            'differentials': [
-                {'condition': 'Allergic Conditions', 'discussion': 'Asthma, allergic rhinitis, eczema. Most common cause.'},
-                {'condition': 'Parasitic Infections', 'discussion': 'Tissue-invasive helminths.'},
-                {'condition': 'Hypereosinophilic Syndrome', 'discussion': 'Persistent >1.5 x10^9/L with organ damage.'}
-            ]
-        }
-    },
-    'Basophils': {
-        'high': {
-            'title': 'Basophilia',
-            'differentials': [
-                {'condition': 'Chronic Myeloid Leukemia', 'discussion': 'Characteristic finding in CML.'},
-                {'condition': 'Other Myeloproliferative Neoplasms', 'discussion': 'PV, myelofibrosis.'},
-                {'condition': 'Allergic/Hypersensitivity', 'discussion': 'Immediate hypersensitivity reactions.'}
-            ]
-        }
-    },
-    'Monocytes': {
-        'high': {
-            'title': 'Monocytosis',
-            'differentials': [
-                {'condition': 'Chronic Infections', 'discussion': 'TB, endocarditis, brucellosis, fungal infections.'},
-                {'condition': 'CMML', 'discussion': 'Persistent monocytosis >1 x10^9/L for >3 months.'},
-                {'condition': 'Recovery from Neutropenia', 'discussion': 'Monocytes recover before neutrophils.'}
-            ]
-        }
-    },
-    'Reticulocytes': {
-        'low': {
-            'title': 'Low Reticulocyte Count',
-            'differentials': [
-                {'condition': 'Aplastic Anemia', 'discussion': 'Bone marrow failure. Low reticulocytes despite anemia.'},
-                {'condition': 'Pure Red Cell Aplasia', 'discussion': 'Selective absence of erythroid precursors.'},
-                {'condition': 'Nutritional Deficiency (Untreated)', 'discussion': 'Iron, B12, folate before treatment.'}
-            ]
+        "low": {
+            "title": "Suppressed TSH (Hyperthyroidism or Over-replacement)",
+            "conditions": [
+                {"name": "Graves' Disease", "prevalence": "Most common hyperthyroidism", "note": "Autoimmune. Check TSI antibodies. Heat intolerance, anxiety, tachycardia."},
+                {"name": "Thyroiditis", "prevalence": "Postpartum, viral, medication-induced", "note": "Painful or painless. Transient hyperthyroid phase."},
+                {"name": "Toxic Nodule/Multinodular Goiter", "prevalence": "Iodine-replete areas", "note": "Thyroid scan/ultrasound shows autonomously functioning nodule(s)."},
+                {"name": "Over-replacement with Levothyroxine", "prevalence": "Iatrogenic", "note": "Patient on thyroid hormone for hypothyroidism or TSH suppression. Adjust dose."},
+                {"name": "TSH-Secreting Pituitary Tumor", "prevalence": "Rare", "note": "High TSH with high free T4 (unusual pattern). MRI pituitary."},
+            ],
         },
-        'high': {
-            'title': 'Elevated Reticulocyte Count',
-            'differentials': [
-                {'condition': 'Hemolytic Anemia', 'discussion': 'Compensatory production. Check LDH, haptoglobin, DAT.'},
-                {'condition': 'Acute Hemorrhage', 'discussion': 'Marrow response peaks at 7-10 days.'},
-                {'condition': 'Response to Treatment', 'discussion': 'Reticulocyte crisis 5-7 days after starting replacement.'}
-            ]
-        }
     },
-    'Hematocrit': {
-        'low': {
-            'title': 'Low Hematocrit',
-            'differentials': [
-                {'condition': 'Anemia (Various)', 'discussion': 'Decreased RBC mass from any cause.'},
-                {'condition': 'Fluid Overload', 'discussion': 'Hemodilution from IV fluids.'},
-                {'condition': 'Pregnancy', 'discussion': 'Physiologic hemodilution.'}
-            ]
-        },
-        'high': {
-            'title': 'Elevated Hematocrit',
-            'differentials': [
-                {'condition': 'Polycythemia Vera', 'discussion': 'HCT >49% men or >48% women. JAK2 testing.'},
-                {'condition': 'Dehydration', 'discussion': 'Relative polycythemia. Corrects with hydration.'},
-                {'condition': 'Chronic Hypoxia', 'discussion': 'COPD, high altitude, sleep apnea.'}
-            ]
-        }
-    },
-    'MCH': {
-        'low': {
-            'title': 'Low MCH',
-            'differentials': [
-                {'condition': 'Iron Deficiency', 'discussion': 'Decreased hemoglobin per cell.'},
-                {'condition': 'Thalassemia', 'discussion': 'Reduced globin synthesis.'}
-            ]
-        },
-        'high': {
-            'title': 'High MCH',
-            'differentials': [
-                {'condition': 'Macrocytic Anemia', 'discussion': 'Larger cells contain more hemoglobin.'},
-                {'condition': 'Spurious', 'discussion': 'Cold agglutinins or lipemia.'}
-            ]
-        }
-    },
-    'ESR': {
-        'high': {
-            'title': 'Elevated ESR',
-            'differentials': [
-                {'condition': 'Infection', 'discussion': 'Acute and chronic infections.'},
-                {'condition': 'Autoimmune/Inflammatory', 'discussion': 'SLE, RA, PMR, GCA. ESR >100 suggests malignancy/vasculitis.'},
-                {'condition': 'Malignancy', 'discussion': 'Multiple myeloma classically causes very high ESR.'},
-                {'condition': 'Anemia', 'discussion': 'Low hematocrit accelerates sedimentation.'}
-            ]
-        }
-    },
-    'PDW': {
-        'high': {
-            'title': 'Elevated PDW',
-            'differentials': [
-                {'condition': 'Reactive Thrombocytosis', 'discussion': 'Variable platelet sizes.'},
-                {'condition': 'Myeloproliferative Disorders', 'discussion': 'Dysplastic megakaryopoiesis.'}
-            ]
-        }
-    }
 }
 
 
-# =============================================
-# CORE FUNCTIONS
-# =============================================
+# ============================================================================
+# CLASSIFICATION LOGIC
+# ============================================================================
 
-def get_reference_range(param: str, sex: str = 'Default') -> Dict:
-    """Get reference range for a parameter based on sex."""
-    if param in REFERENCE_RANGES:
-        ranges = REFERENCE_RANGES[param]
-        if sex in ranges:
-            return ranges[sex]
-        return ranges.get('Default', {})
-    return {}
-
-
-def classify_value(param: str, value: float, sex: str = 'Default') -> Dict:
-    """Classify a parameter value as normal, low, high, or critical."""
-    ref = get_reference_range(param, sex)
-    if not ref:
-        return {'status': 'unknown', 'message': 'No reference range available', 'color': 'gray', 'value': value}
-
-    result = {
-        'value': value,
-        'unit': ref.get('unit', ''),
-        'low': ref.get('low'),
-        'high': ref.get('high'),
-        'critical_low': ref.get('critical_low'),
-        'critical_high': ref.get('critical_high'),
-    }
-
-    if value < ref.get('critical_low', float('-inf')):
-        result['status'] = 'critical_low'
-        result['message'] = f'CRITICAL LOW: {value} {ref["unit"]} (Ref: {ref["low"]}-{ref["high"]})'
-        result['color'] = 'red'
-    elif value > ref.get('critical_high', float('inf')):
-        result['status'] = 'critical_high'
-        result['message'] = f'CRITICAL HIGH: {value} {ref["unit"]} (Ref: {ref["low"]}-{ref["high"]})'
-        result['color'] = 'red'
-    elif value < ref.get('low', 0):
-        result['status'] = 'low'
-        result['message'] = f'LOW: {value} {ref["unit"]} (Ref: {ref["low"]}-{ref["high"]})'
-        result['color'] = 'orange'
-    elif value > ref.get('high', float('inf')):
-        result['status'] = 'high'
-        result['message'] = f'HIGH: {value} {ref["unit"]} (Ref: {ref["low"]}-{ref["high"]})'
-        result['color'] = 'orange'
-    else:
-        result['status'] = 'normal'
-        result['message'] = f'NORMAL: {value} {ref["unit"]} (Ref: {ref["low"]}-{ref["high"]})'
-        result['color'] = 'green'
-
-    return result
-
-
-def get_differential_diagnosis(param: str, status: str) -> Optional[Dict]:
-    """Get differential diagnosis for an abnormal parameter."""
-    if param in DIFFERENTIAL_DIAGNOSES:
-        direction = status.replace('critical_', '')
-        if direction in DIFFERENTIAL_DIAGNOSES[param]:
-            return DIFFERENTIAL_DIAGNOSES[param][direction]
+def get_reference_range(param: str, sex: str = "Default") -> Optional[Dict]:
+    """
+    Get reference range for a parameter.
+    
+    Returns
+    -------
+    {"low": float, "high": float, "unit": str, ...}
+    """
+    if param not in REFERENCE_RANGES:
+        return None
+    
+    ref_data = REFERENCE_RANGES[param]
+    if sex in ref_data:
+        return ref_data[sex].copy()
+    elif "Default" in ref_data:
+        return ref_data["Default"].copy()
     return None
 
 
-def check_sample_quality(parameters: Dict) -> List[Dict]:
-    """Check sample quality using various rules and consistency checks."""
-    issues = []
-
-    rbc = parameters.get('RBC', {}).get('value')
-    hb = parameters.get('Hemoglobin', {}).get('value')
-    hct = parameters.get('Hematocrit', {}).get('value')
-
-    if rbc and hb and hct:
-        expected_hb = rbc * 3
-        hb_diff = abs(hb - expected_hb)
-        if hb_diff > 1.5:
-            issues.append({
-                'rule': 'Rule of Threes (RBC x 3 = Hb)',
-                'expected': f'{expected_hb:.1f} g/dL',
-                'actual': f'{hb:.1f} g/dL',
-                'deviation': f'{hb_diff:.1f} g/dL',
-                'severity': 'warning' if hb_diff < 3.0 else 'error',
-                'interpretation': 'RBC x 3 should equal Hb. Deviation suggests spurious results, thalassemia, or iron deficiency.'
-            })
-
-        expected_hct = hb * 3
-        hct_diff = abs(hct - expected_hct)
-        if hct_diff > 3.0:
-            issues.append({
-                'rule': 'Rule of Threes (Hb x 3 = HCT)',
-                'expected': f'{expected_hct:.1f}%',
-                'actual': f'{hct:.1f}%',
-                'deviation': f'{hct_diff:.1f}%',
-                'severity': 'warning' if hct_diff < 6.0 else 'error',
-                'interpretation': 'Hb x 3 should equal HCT. Deviation may indicate sample issues or abnormal hemoglobin.'
-            })
-
-    mcv = parameters.get('MCV', {}).get('value')
-    if rbc and hct and mcv:
-        calculated_mcv = (hct * 10) / rbc
-        mcv_diff = abs(mcv - calculated_mcv)
-        if mcv_diff > 5:
-            issues.append({
-                'rule': 'MCV Consistency (HCT x 10 / RBC)',
-                'expected': f'{calculated_mcv:.1f} fL',
-                'actual': f'{mcv:.1f} fL',
-                'deviation': f'{mcv_diff:.1f} fL',
-                'severity': 'warning',
-                'interpretation': 'Measured MCV differs from calculated. May indicate instrument issues or RBC agglutination.'
-            })
-
-    mchc = parameters.get('MCHC', {}).get('value')
-    if mchc and mchc > 36.5:
-        issues.append({
-            'rule': 'MCHC Upper Limit Check',
-            'expected': '32.0-36.0 g/dL',
-            'actual': f'{mchc:.1f} g/dL',
-            'deviation': f'{mchc - 36.0:.1f} g/dL above',
-            'severity': 'warning',
-            'interpretation': 'MCHC >36 may indicate spherocytosis, cold agglutinins, or lipemia artifact.'
-        })
-
-    diff_params = ['Neutrophils', 'Lymphocytes', 'Monocytes', 'Eosinophils', 'Basophils']
-    diff_values = [parameters.get(p, {}).get('value') for p in diff_params]
-    diff_values = [v for v in diff_values if v is not None]
-
-    if len(diff_values) >= 3:
-        diff_sum = sum(diff_values)
-        if abs(diff_sum - 100) > 5:
-            issues.append({
-                'rule': 'WBC Differential Sum',
-                'expected': '100%',
-                'actual': f'{diff_sum:.1f}%',
-                'deviation': f'{abs(diff_sum - 100):.1f}%',
-                'severity': 'warning' if abs(diff_sum - 100) < 10 else 'error',
-                'interpretation': 'WBC differential should sum to ~100%. Deviation may indicate extraction errors.'
-            })
-
-    plt_val = parameters.get('Platelets', {}).get('value')
-    mpv_val = parameters.get('MPV', {}).get('value')
-    if plt_val and mpv_val:
-        if plt_val > 400 and mpv_val > 11:
-            issues.append({
-                'rule': 'Platelet-MPV Inverse Relationship',
-                'expected': 'High platelets with Low-normal MPV',
-                'actual': f'Plt: {plt_val:.0f}, MPV: {mpv_val:.1f}',
-                'deviation': 'Both elevated',
-                'severity': 'info',
-                'interpretation': 'Both elevated may suggest myeloproliferative neoplasm.'
-            })
-        elif plt_val < 150 and mpv_val < 8:
-            issues.append({
-                'rule': 'Platelet-MPV Inverse Relationship',
-                'expected': 'Low platelets with High MPV',
-                'actual': f'Plt: {plt_val:.0f}, MPV: {mpv_val:.1f}',
-                'deviation': 'Both decreased',
-                'severity': 'info',
-                'interpretation': 'Both low suggests bone marrow suppression rather than peripheral destruction.'
-            })
-
-    if not issues:
-        issues.append({
-            'rule': 'Overall Quality Assessment',
-            'expected': 'All checks passed',
-            'actual': 'All checks passed',
-            'deviation': 'None',
-            'severity': 'pass',
-            'interpretation': 'No quality issues detected. Results appear internally consistent.'
-        })
-
-    return issues
-
-
-# =============================================
-# ADDITIONAL CALCULATED INDICES
-# =============================================
-
-def get_anc_interpretation(anc: float) -> str:
-    if anc < 0.2:
-        return f'{anc:.2f} x10^9/L - Very severe neutropenia (high infection risk)'
-    elif anc < 0.5:
-        return f'{anc:.2f} x10^9/L - Severe neutropenia'
-    elif anc < 1.0:
-        return f'{anc:.2f} x10^9/L - Moderate neutropenia'
-    elif anc < 1.5:
-        return f'{anc:.2f} x10^9/L - Mild neutropenia'
-    elif anc <= 8.0:
-        return f'{anc:.2f} x10^9/L - Normal'
+def classify_value(param: str, value: float, sex: str = "Default") -> Dict[str, Any]:
+    """
+    Classify a value as normal, low, high, or critical.
+    
+    Returns
+    -------
+    {
+        "status": "normal|low|high|critical_low|critical_high|unknown",
+        "message": "Human-readable classification",
+        "color": "green|yellow|orange|red|gray",
+        "low": float,
+        "high": float,
+        "unit": str,
+    }
+    """
+    ref = get_reference_range(param, sex)
+    if ref is None:
+        return {
+            "status": "unknown",
+            "message": f"No reference range for {param}",
+            "color": "gray",
+            "low": None,
+            "high": None,
+            "unit": "unknown",
+        }
+    
+    low = ref.get("low")
+    high = ref.get("high")
+    critical_low = ref.get("critical_low", low)
+    critical_high = ref.get("critical_high", high)
+    unit = ref.get("unit", "")
+    
+    # Determine status
+    if critical_low is not None and value < critical_low:
+        status = "critical_low"
+        message = f"CRITICAL LOW: {value} {unit} (ref: {low}-{high})"
+        color = "red"
+    elif critical_high is not None and value > critical_high:
+        status = "critical_high"
+        message = f"CRITICAL HIGH: {value} {unit} (ref: {low}-{high})"
+        color = "red"
+    elif low is not None and value < low:
+        status = "low"
+        message = f"Low: {value} {unit} (ref: {low}-{high})"
+        color = "orange"
+    elif high is not None and value > high:
+        status = "high"
+        message = f"High: {value} {unit} (ref: {low}-{high})"
+        color = "orange"
     else:
-        return f'{anc:.2f} x10^9/L - Neutrophilia'
-
-
-def get_nlr_interpretation(nlr: float) -> str:
-    if nlr < 1:
-        return f'{nlr:.2f} - Low (consider viral infection or neutropenia)'
-    elif nlr <= 3:
-        return f'{nlr:.2f} - Normal'
-    elif nlr <= 9:
-        return f'{nlr:.2f} - Mildly elevated (mild stress/infection)'
-    else:
-        return f'{nlr:.2f} - Significantly elevated (severe infection/inflammation)'
-
-
-def calculate_additional_indices(parameters: Dict) -> Dict:
-    """Calculate additional hematological indices."""
-    indices = {}
-
-    rbc = parameters.get('RBC', {}).get('value')
-    mcv = parameters.get('MCV', {}).get('value')
-    hb = parameters.get('Hemoglobin', {}).get('value')
-    hct = parameters.get('Hematocrit', {}).get('value')
-    wbc = parameters.get('WBC', {}).get('value')
-    neut_pct = parameters.get('Neutrophils', {}).get('value')
-    lymph_pct = parameters.get('Lymphocytes', {}).get('value')
-
-    if mcv and rbc and rbc > 0:
-        mentzer = mcv / rbc
-        indices['Mentzer Index'] = {
-            'value': round(mentzer, 1),
-            'interpretation': 'Suggests thalassemia trait' if mentzer < 13 else 'Suggests iron deficiency',
-            'formula': 'MCV / RBC',
-            'note': '<13 = thalassemia trait; >13 = iron deficiency'
-        }
-
-    if hb and hct and hct > 0:
-        calc_mchc = (hb / hct) * 100
-        indices['Calculated MCHC'] = {
-            'value': round(calc_mchc, 1),
-            'interpretation': f'{calc_mchc:.1f} g/dL',
-            'formula': '(Hb / HCT) x 100',
-            'note': 'Should match reported MCHC'
-        }
-
-    if hb and rbc and rbc > 0:
-        calc_mch = (hb / rbc) * 10
-        indices['Calculated MCH'] = {
-            'value': round(calc_mch, 1),
-            'interpretation': f'{calc_mch:.1f} pg',
-            'formula': '(Hb / RBC) x 10',
-            'note': 'Should match reported MCH'
-        }
-
-    if wbc and neut_pct:
-        anc = wbc * (neut_pct / 100)
-        indices['Calculated ANC'] = {
-            'value': round(anc, 2),
-            'interpretation': get_anc_interpretation(anc),
-            'formula': 'WBC x (Neutrophils% / 100)',
-            'note': '<1.5 = neutropenia; <0.5 = severe'
-        }
-
-    if wbc and lymph_pct:
-        alc = wbc * (lymph_pct / 100)
-        indices['Calculated ALC'] = {
-            'value': round(alc, 2),
-            'interpretation': f'{alc:.2f} x10^9/L',
-            'formula': 'WBC x (Lymphocytes% / 100)',
-            'note': 'Normal: 1.0-4.0 x10^9/L'
-        }
-
-    if neut_pct and lymph_pct and lymph_pct > 0:
-        nlr = neut_pct / lymph_pct
-        indices['NLR'] = {
-            'value': round(nlr, 2),
-            'interpretation': get_nlr_interpretation(nlr),
-            'formula': 'Neutrophils% / Lymphocytes%',
-            'note': 'Normal: 1-3; Elevated in infection/inflammation'
-        }
-
-    return indices
-
-
-# =============================================
-# MAIN ANALYSIS FUNCTION
-# =============================================
-
-def analyze_all_parameters(parameters: Dict, sex: str = 'Default') -> Dict:
-    """Perform comprehensive analysis of all parameters."""
-    results = {}
-    abnormalities = []
-    critical_values = []
-
-    for param_name, param_data in parameters.items():
-        value = param_data.get('value')
-        if value is None:
-            continue
-
-        classification = classify_value(param_name, value, sex)
-        differential = None
-
-        if classification['status'] not in ['normal', 'unknown']:
-            differential = get_differential_diagnosis(param_name, classification['status'])
-            abnormalities.append({
-                'parameter': param_name,
-                'classification': classification,
-                'differential': differential
-            })
-            if 'critical' in classification['status']:
-                critical_values.append({
-                    'parameter': param_name,
-                    'value': value,
-                    'status': classification['status'],
-                    'message': classification['message']
-                })
-
-        results[param_name] = {
-            'value': value,
-            'unit': param_data.get('unit', classification.get('unit', '')),
-            'classification': classification,
-            'differential': differential
-        }
-
-    quality_checks = check_sample_quality(parameters)
-    calculated_indices = calculate_additional_indices(parameters)
-
+        status = "normal"
+        message = f"Normal: {value} {unit} (ref: {low}-{high})"
+        color = "green"
+    
     return {
-        'parameters': results,
-        'abnormalities': abnormalities,
-        'critical_values': critical_values,
-        'quality_checks': quality_checks,
-        'calculated_indices': calculated_indices,
-        'total_parameters': len(results),
-        'abnormal_count': len(abnormalities),
-        'critical_count': len(critical_values)
+        "status": status,
+        "message": message,
+        "color": color,
+        "low": low,
+        "high": high,
+        "unit": unit,
     }
 
 
-# =============================================
-# TEXT SUMMARY GENERATOR
-# =============================================
+def get_differential_diagnosis(param: str, status: str) -> Optional[List[Dict]]:
+    """
+    Get differential diagnosis for an abnormal parameter.
+    
+    Args
+    ----
+    param : str
+        Parameter name (e.g., "Hemoglobin")
+    status : str
+        "low" or "high"
+    
+    Returns
+    -------
+    [{"name": str, "prevalence": str, "note": str}, ...]
+    """
+    if param not in DIFFERENTIAL_DIAGNOSES:
+        return None
+    
+    dx = DIFFERENTIAL_DIAGNOSES[param]
+    if status in dx:
+        return dx[status].get("conditions", [])
+    
+    return None
 
-def generate_summary_text(analysis: Dict, patient_info: Dict) -> str:
-    """Generate a text summary of the analysis."""
+
+# ============================================================================
+# QUALITY CHECKS
+# ============================================================================
+
+def check_sample_quality(parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Assess sample quality using consistency rules.
+    
+    Returns
+    -------
+    {
+        "issues": [
+            {"rule": str, "severity": "warning|error", "details": str},
+            ...
+        ],
+        "quality_score": 0-100,
+        "summary": str,
+    }
+    """
+    issues = []
+    score = 100
+    
+    # Extract CBC values
+    rbc = parameters.get("RBC", {}).get("value")
+    hb = parameters.get("Hemoglobin", {}).get("value")
+    hct = parameters.get("Hematocrit", {}).get("value")
+    mcv = parameters.get("MCV", {}).get("value")
+    wbc = parameters.get("WBC", {}).get("value")
+    platelets = parameters.get("Platelets", {}).get("value")
+    
+    # ────────────────────────────────────────────────────────────────
+    # Rule of Threes: RBC × 3 = Hb
+    # ────────────────────────────────────────────────────────────────
+    if rbc and hb:
+        expected_hb = rbc * 3
+        diff = abs(hb - expected_hb)
+        if diff > 1.5:
+            severity = "warning" if diff < 3 else "error"
+            issues.append({
+                "rule": "Rule of Threes (RBC × 3 = Hb)",
+                "severity": severity,
+                "details": f"Expected Hb ≈ {expected_hb:.1f} g/dL, got {hb:.1f} g/dL (diff: {diff:.1f})",
+                "possible_causes": "Sample clotting, hemolysis, abnormal hemoglobin, thalassemia, iron deficiency",
+            })
+            score -= 10 if severity == "warning" else 20
+    
+    # ────────────────────────────────────────────────────────────────
+    # Rule of Threes: Hb × 3 = Hct
+    # ────────────────────────────────────────────────────────────────
+    if hb and hct:
+        expected_hct = hb * 3
+        diff = abs(hct - expected_hct)
+        if diff > 3.0:
+            severity = "warning" if diff < 6 else "error"
+            issues.append({
+                "rule": "Rule of Threes (Hb × 3 = Hct)",
+                "severity": severity,
+                "details": f"Expected Hct ≈ {expected_hct:.1f}%, got {hct:.1f}% (diff: {diff:.1f}%)",
+                "possible_causes": "Sample issues, abnormal hemoglobin, thalassemia",
+            })
+            score -= 10 if severity == "warning" else 20
+    
+    # ────────────────────────────────────────────────────────────────
+    # Mentzer Index: MCV/RBC < 13 suggests thalassemia; > 13 suggests iron deficiency
+    # ────────────────────────────────────────────────────────────────
+    if mcv and rbc and rbc > 0:
+        mentzer = mcv / rbc
+        if mentzer < 10:
+            issues.append({
+                "rule": "Mentzer Index",
+                "severity": "warning",
+                "details": f"Mentzer Index = {mentzer:.1f} (<10 suggests thalassemia trait)",
+                "note": "Consider hemoglobin electrophoresis; may not need iron supplementation.",
+            })
+            score -= 5
+    
+    # ────────────────────────────────────────────────────────────────
+    # Physiologic Impossibilities
+    # ────────────────────────────────────────────────────────────────
+    if hct and (hct < 10 or hct > 65):
+        issues.append({
+            "rule": "Hematocrit Out of Physiologic Range",
+            "severity": "error",
+            "details": f"Hct = {hct}% is physiologically implausible",
+            "note": "Check for sample issues, data entry error, or genuine critical state.",
+        })
+        score -= 20
+    
+    if wbc and (wbc < 0.5 or wbc > 150):
+        issues.append({
+            "rule": "WBC Out of Physiologic Range",
+            "severity": "error",
+            "details": f"WBC = {wbc} ×10⁹/L is extremely rare",
+            "note": "Verify sample quality and data entry.",
+        })
+        score -= 20
+    
+    if platelets and (platelets < 5 or platelets > 2000):
+        issues.append({
+            "rule": "Platelets Out of Physiologic Range",
+            "severity": "error",
+            "details": f"Platelets = {platelets} ×10⁹/L is extremely rare",
+            "note": "Verify sample quality; clotting artifact likely.",
+        })
+        score -= 20
+    
+    score = max(0, min(100, score))
+    
+    summary = (
+        "Excellent sample quality" if score >= 90
+        else "Good sample quality with minor issues" if score >= 70
+        else "Questionable sample quality; recommend repeat" if score >= 50
+        else "Poor sample quality; REPEAT TEST RECOMMENDED"
+    )
+    
+    return {
+        "issues": issues,
+        "quality_score": score,
+        "summary": summary,
+    }
+
+
+# ============================================================================
+# CALCULATED INDICES
+# ============================================================================
+
+def calculate_indices(parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Calculate derived indices from measured parameters.
+    
+    Returns
+    -------
+    {
+        "Mentzer Index": {...},
+        "NLR": {...},
+        "BUN/Cr Ratio": {...},
+        ...
+    }
+    """
+    indices = {}
+    
+    # ────────────────────────────────────────────────────────────────
+    # CBC Indices
+    # ────────────────────────────────────────────────────────────────
+    rbc = parameters.get("RBC", {}).get("value")
+    mcv = parameters.get("MCV", {}).get("value")
+    if rbc and mcv and rbc > 0:
+        mentzer = mcv / rbc
+        indices["Mentzer_Index"] = {
+            "value": round(mentzer, 1),
+            "formula": "MCV / RBC",
+            "interpretation": "Thalassemia trait" if mentzer < 13 else "Iron deficiency or normal",
+            "note": "<13 suggestive of thalassemia; >13 iron deficiency",
+        }
+    
+    hb = parameters.get("Hemoglobin", {}).get("value")
+    hct = parameters.get("Hematocrit", {}).get("value")
+    if hb and hct and hct > 0:
+        calc_mchc = (hb / hct) * 100
+        indices["Calculated_MCHC"] = {
+            "value": round(calc_mchc, 1),
+            "formula": "(Hb / Hct) × 100",
+            "interpretation": f"{calc_mchc:.1f} g/dL",
+            "note": "Should match reported MCHC",
+        }
+    
+    wbc = parameters.get("WBC", {}).get("value")
+    neutrophils = parameters.get("Neutrophils", {}).get("value")
+    lymphocytes = parameters.get("Lymphocytes", {}).get("value")
+    
+    if wbc and neutrophils:
+        anc = wbc * (neutrophils / 100)
+        indices["Calculated_ANC"] = {
+            "value": round(anc, 2),
+            "formula": "WBC × (Neutrophils% / 100)",
+            "interpretation": f"{anc:.2f} ×10⁹/L",
+            "note": "<1.5 neutropenia; <0.5 severe neutropenia",
+        }
+    
+    if wbc and lymphocytes:
+        alc = wbc * (lymphocytes / 100)
+        indices["Calculated_ALC"] = {
+            "value": round(alc, 2),
+            "formula": "WBC × (Lymphocytes% / 100)",
+            "interpretation": f"{alc:.2f} ×10⁹/L",
+            "note": "Normal: 1.0-4.8 ×10⁹/L",
+        }
+    
+    if wbc and neutrophils and lymphocytes:
+        nlr = (wbc * neutrophils / 100) / (wbc * lymphocytes / 100) if (wbc * lymphocytes / 100) > 0 else None
+        if nlr:
+            indices["NLR"] = {
+                "value": round(nlr, 2),
+                "formula": "ANC / ALC",
+                "interpretation": f"{nlr:.2f}",
+                "note": "Elevated NLR associated with infection, inflammation, poor prognosis in cancer",
+            }
+    
+    # ────────────────────────────────────────────────────────────────
+    # LFT Indices
+    # ────────────────────────────────────────────────────────────────
+    total_bili = parameters.get("Total_Bilirubin", {}).get("value")
+    direct_bili = parameters.get("Direct_Bilirubin", {}).get("value")
+    if total_bili and direct_bili:
+        indirect_bili = total_bili - direct_bili
+        indices["Indirect_Bilirubin"] = {
+            "value": round(indirect_bili, 2),
+            "formula": "Total Bilirubin - Direct Bilirubin",
+            "interpretation": f"{indirect_bili:.2f} mg/dL",
+            "note": "Indirect hyperbilirubinemia suggests hemolysis or unconjugated hyperbilirubinemia",
+        }
+    
+    total_protein = parameters.get("Total_Protein", {}).get("value")
+    albumin = parameters.get("Albumin", {}).get("value")
+    if total_protein and albumin:
+        globulin = total_protein - albumin
+        indices["Globulin"] = {
+            "value": round(globulin, 2),
+            "formula": "Total Protein - Albumin",
+            "interpretation": f"{globulin:.2f} g/dL",
+        }
+        if globulin > 0:
+            ag_ratio = albumin / globulin
+            indices["AG_Ratio"] = {
+                "value": round(ag_ratio, 2),
+                "formula": "Albumin / Globulin",
+                "interpretation": f"{ag_ratio:.2f}",
+                "note": "Normally 1:1 to 2:1; inverted ratio suggests cirrhosis or chronic liver disease",
+            }
+    
+    alt = parameters.get("ALT", {}).get("value")
+    ast = parameters.get("AST", {}).get("value")
+    if alt and ast:
+        ast_alt_ratio = ast / alt if alt > 0 else None
+        if ast_alt_ratio:
+            indices["AST_ALT_Ratio"] = {
+                "value": round(ast_alt_ratio, 2),
+                "formula": "AST / ALT",
+                "interpretation": f"{ast_alt_ratio:.2f}",
+                "note": "<1 hepatitis; >2 alcoholic liver disease or cirrhosis",
+            }
+    
+    # ────────────────────────────────────────────────────────────────
+    # KFT Indices
+    # ────────────────────────────────────────────────────────────────
+    bun = parameters.get("BUN", {}).get("value")
+    creatinine = parameters.get("Serum_Creatinine", {}).get("value")
+    if bun and creatinine and creatinine > 0:
+        bun_cr_ratio = bun / creatinine
+        indices["BUN_Creatinine_Ratio"] = {
+            "value": round(bun_cr_ratio, 1),
+            "formula": "BUN / Creatinine",
+            "interpretation": f"{bun_cr_ratio:.1f}",
+            "note": ">20 pre-renal; 10-20 normal; <10 intrinsic/hepatic",
+        }
+    
+    sodium = parameters.get("Serum_Sodium", {}).get("value")
+    chloride = parameters.get("Serum_Chloride", {}).get("value")
+    hco3 = parameters.get("Serum_Bicarbonate", {}).get("value")
+    if sodium and chloride and hco3:
+        anion_gap = sodium - (chloride + hco3)
+        indices["Anion_Gap"] = {
+            "value": round(anion_gap, 1),
+            "formula": "Na - (Cl + HCO3)",
+            "interpretation": f"{anion_gap:.1f} mEq/L",
+            "note": ">12 metabolic acidosis with high anion gap; <8 low anion gap acidosis",
+        }
+    
+    # ────────────────────────────────────────────────────────────────
+    # Lipid Indices
+    # ────────────────────────────────────────────────────────��───────
+    tc = parameters.get("Total_Cholesterol", {}).get("value")
+    hdl = parameters.get("HDL_Cholesterol", {}).get("value")
+    triglycerides = parameters.get("Triglycerides", {}).get("value")
+    
+    if triglycerides:
+        vldl = triglycerides / 5
+        indices["Calculated_VLDL"] = {
+            "value": round(vldl, 1),
+            "formula": "Triglycerides / 5",
+            "interpretation": f"{vldl:.1f} mg/dL",
+            "note": "Estimated VLDL; direct VLDL measurement preferred if available",
+        }
+    
+    if tc and hdl and triglycerides and hdl > 0:
+        vldl = triglycerides / 5
+        ldl = tc - hdl - vldl
+        indices["Calculated_LDL"] = {
+            "value": round(ldl, 1),
+            "formula": "TC - HDL - (Triglycerides/5)",
+            "interpretation": f"{ldl:.1f} mg/dL",
+            "note": "Friedewald formula; less accurate if triglycerides >400 or LDL <25",
+        }
+    
+    if tc and hdl:
+        non_hdl = tc - hdl
+        indices["Non_HDL_Cholesterol"] = {
+            "value": round(non_hdl, 1),
+            "formula": "TC - HDL",
+            "interpretation": f"{non_hdl:.1f} mg/dL",
+            "note": "Better predictor of CVD risk than LDL alone; includes all atherogenic particles",
+        }
+        
+        if hdl > 0:
+            tc_hdl_ratio = tc / hdl
+            indices["TC_HDL_Ratio"] = {
+                "value": round(tc_hdl_ratio, 2),
+                "formula": "TC / HDL",
+                "interpretation": f"{tc_hdl_ratio:.2f}",
+                "note": "<5 good; >5 increased CVD risk",
+            }
+    
+    # ────────────────────────────────────────────────────────────────
+    # Diabetes Indices
+    # ────────────────────────────────────────────────────────────────
+    fbg = parameters.get("Fasting_Blood_Glucose", {}).get("value")
+    fasting_insulin = parameters.get("Fasting_Insulin", {}).get("value")
+    if fbg and fasting_insulin:
+        homa_ir = (fbg * fasting_insulin) / 405
+        indices["HOMA_IR"] = {
+            "value": round(homa_ir, 2),
+            "formula": "(FBG × Fasting Insulin) / 405",
+            "interpretation": f"{homa_ir:.2f}",
+            "note": "<1 normal; 1-2 borderline; >2 insulin resistance",
+        }
+    
+    return indices
+
+
+# ============================================================================
+# COMPREHENSIVE ANALYSIS
+# ============================================================================
+
+def analyze_all_parameters(
+    parameters: Dict[str, Any],
+    patient_info: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """
+    Perform comprehensive analysis of all blood test parameters.
+    
+    Args
+    ----
+    parameters : dict
+        Flat dictionary of {param_key: {value, unit, panel, raw_match}}
+    patient_info : dict
+        Optional {name, age, sex, date, lab_ref, ...}
+    
+    Returns
+    -------
+    {
+        "summary": {...},
+        "parameters": {param: {value, classification, differential, ...}},
+        "quality": {...},
+        "indices": {...},
+        "critical_values": [...],
+        "abnormalities": [...],
+        "recommendations": [...],
+        "panels": {panel: {...}},
+    }
+    """
+    
+    if patient_info is None:
+        patient_info = {}
+    
+    sex = patient_info.get("sex", "Default")
+    
+    # ────────────────────────────────────────────────────────────────
+    # Classify all parameters
+    # ────────────────────────────────────────────────────────────────
+    classified = {}
+    abnormalities = []
+    critical_values = []
+    
+    for param_key, param_data in parameters.items():
+        if not isinstance(param_data, dict):
+            continue
+        
+        value = param_data.get("value")
+        unit = param_data.get("unit", "")
+        panel = param_data.get("panel", "Other")
+        
+        # Skip if no value or is text (qualitative)
+        if value is None or isinstance(value, str):
+            classified[param_key] = {
+                "value": value,
+                "unit": unit,
+                "panel": panel,
+                "classification": {"status": "text_value", "message": str(value), "color": "blue"},
+                "differential": None,
+            }
+            continue
+        
+        # Classify numeric values
+        classification = classify_value(param_key, value, sex)
+        differential = None
+        
+        if classification["status"] not in ("normal", "unknown"):
+            # Get differential for abnormal values
+            status_type = classification["status"].replace("critical_", "")
+            diff_conditions = get_differential_diagnosis(param_key, status_type)
+            if diff_conditions:
+                differential = {
+                    "status": status_type,
+                    "conditions": diff_conditions,
+                }
+            
+            # Track abnormalities
+            abnormalities.append({
+                "parameter": param_key,
+                "value": value,
+                "classification": classification,
+                "differential": differential,
+            })
+            
+            # Track critical values
+            if "critical" in classification["status"]:
+                critical_values.append({
+                    "parameter": param_key,
+                    "value": value,
+                    "status": classification["status"],
+                    "message": classification["message"],
+                })
+        
+        classified[param_key] = {
+            "value": value,
+            "unit": unit,
+            "panel": panel,
+            "classification": classification,
+            "differential": differential,
+        }
+    
+    # ────────────────────────────────────────────────────────────────
+    # Quality checks
+    # ────────────────────────────────────────────────────────────────
+    quality = check_sample_quality(parameters)
+    
+    # ────────────────────────────────────────────────────────────────
+    # Calculate indices
+    # ────────────────────────────────────────────────────────────────
+    indices = calculate_indices(parameters)
+    
+    # ────────────────────────────────────────────────────────────────
+    # Panel grouping
+    # ────────────────────────────────────────────────────────────────
+    panels = {}
+    for param_key, param_data in classified.items():
+        panel = param_data.get("panel", "Other")
+        if panel not in panels:
+            panels[panel] = {}
+        panels[panel][param_key] = param_data
+    
+    # ────────────────────────────────────────────────────────────────
+    # Summary statistics
+    # ────────────────────────────────────────────────────────────────
+    summary = {
+        "analysis_date": datetime.now().isoformat(),
+        "patient_info": patient_info,
+        "total_parameters": len(classified),
+        "abnormal_count": len(abnormalities),
+        "critical_count": len(critical_values),
+        "quality_score": quality["quality_score"],
+    }
+    
+    return {
+        "summary": summary,
+        "parameters": classified,
+        "quality": quality,
+        "indices": indices,
+        "critical_values": critical_values,
+        "abnormalities": abnormalities,
+        "panels": panels,
+    }
+
+
+# ============================================================================
+# RECOMMENDATIONS
+# ============================================================================
+
+def get_clinical_recommendations(analysis: Dict[str, Any]) -> List[Dict[str, str]]:
+    """
+    Generate clinical recommendations based on analysis.
+    
+    Returns
+    -------
+    [
+        {"priority": "high|medium|low", "category": str, "recommendation": str},
+        ...
+    ]
+    """
+    recommendations = []
+    
+    # Critical values
+    if analysis.get("critical_values"):
+        recommendations.append({
+            "priority": "high",
+            "category": "URGENT",
+            "recommendation": "CRITICAL VALUES DETECTED. Notify physician immediately. Consider repeat testing to confirm.",
+        })
+    
+    # Poor sample quality
+    if analysis["quality"]["quality_score"] < 50:
+        recommendations.append({
+            "priority": "high",
+            "category": "Sample Quality",
+            "recommendation": "Sample quality is questionable. REPEAT TEST RECOMMENDED to rule out pre-analytical error.",
+        })
+    
+    # Abnormalities
+    abnormalities = analysis.get("abnormalities", [])
+    if abnormalities:
+        for abnorm in abnormalities[:5]:  # Top 5
+            param = abnorm["parameter"]
+            value = abnorm["value"]
+            classification = abnorm["classification"]
+            
+            recommendations.append({
+                "priority": "high" if "critical" in classification["status"] else "medium",
+                "category": f"Parameter: {param}",
+                "recommendation": f"{classification['message']} → Consider evaluation for underlying causes.",
+            })
+    
+    # Lipid profile pattern
+    ldl = analysis["parameters"].get("LDL_Cholesterol", {})
+    hdl = analysis["parameters"].get("HDL_Cholesterol", {})
+    if ldl.get("classification", {}).get("status") == "high" and hdl.get("classification", {}).get("status") == "low":
+        recommendations.append({
+            "priority": "medium",
+            "category": "Lipid Pattern",
+            "recommendation": "Atherogenic dyslipidemia (high LDL + low HDL). Intensify lifestyle modifications and consider statin therapy.",
+        })
+    
+    # Anemia workup
+    hb = analysis["parameters"].get("Hemoglobin", {})
+    if hb.get("classification", {}).get("status") == "low":
+        recommendations.append({
+            "priority": "medium",
+            "category": "Anemia Workup",
+            "recommendation": "Low hemoglobin. Recommend: iron studies, ferritin, B12, folate, peripheral smear, reticulocyte count.",
+        })
+    
+    # Renal function
+    creatinine = analysis["parameters"].get("Serum_Creatinine", {})
+    bun = analysis["parameters"].get("BUN", {})
+    if creatinine.get("classification", {}).get("status") in ("high", "critical_high"):
+        recommendations.append({
+            "priority": "medium",
+            "category": "Renal Function",
+            "recommendation": "Elevated creatinine. Check eGFR, urinalysis, renal ultrasound if new. Adjust medication doses for renal impairment.",
+        })
+    
+    # Glucose control
+    fbs = analysis["parameters"].get("Fasting_Blood_Glucose", {})
+    hba1c = analysis["parameters"].get("HbA1c", {})
+    if fbs.get("classification", {}).get("status") in ("high", "critical_high") or hba1c.get("classification", {}).get("status") in ("high", "critical_high"):
+        recommendations.append({
+            "priority": "medium",
+            "category": "Diabetes Management",
+            "recommendation": "Elevated glucose/HbA1c. Optimize diabetes medications, diet, exercise. Check for DKA if severely elevated.",
+        })
+    
+    # Liver function
+    alt = analysis["parameters"].get("ALT", {})
+    ast = analysis["parameters"].get("AST", {})
+    if alt.get("classification", {}).get("status") in ("high", "critical_high") or ast.get("classification", {}).get("status") in ("high", "critical_high"):
+        recommendations.append({
+            "priority": "medium",
+            "category": "Liver Function",
+            "recommendation": "Elevated transaminases. Assess for viral hepatitis, fatty liver, cirrhosis. Check viral serology, ultrasound.",
+        })
+    
+    return recommendations
+
+
+# ============================================================================
+# REPORT GENERATION
+# ============================================================================
+
+def generate_summary_report(analysis: Dict[str, Any], patient_info: Optional[Dict] = None) -> str:
+    """
+    Generate a formatted text summary report.
+    
+    Returns
+    -------
+    Formatted multi-line string
+    """
+    if patient_info is None:
+        patient_info = analysis.get("summary", {}).get("patient_info", {})
+    
     lines = []
-    lines.append("=" * 60)
-    lines.append("HEMATOLOGY BLOOD INVESTIGATION ANALYSIS REPORT")
-    lines.append("=" * 60)
+    lines.append("=" * 70)
+    lines.append("BLOOD INVESTIGATION ANALYSIS REPORT".center(70))
+    lines.append("=" * 70)
     lines.append("")
-
+    
+    # Patient info
     if patient_info:
         lines.append("PATIENT INFORMATION")
-        lines.append("-" * 40)
+        lines.append("-" * 70)
         for key, value in patient_info.items():
             if value:
-                lines.append(f"  {key.capitalize()}: {value}")
+                lines.append(f"  {key.replace('_', ' ').title():.<30} {value}")
         lines.append("")
-
-    lines.append("SUMMARY")
-    lines.append("-" * 40)
-    lines.append(f"  Total Parameters Analyzed: {analysis.get('total_parameters', 0)}")
-    lines.append(f"  Abnormal Values: {analysis.get('abnormal_count', 0)}")
-    lines.append(f"  Critical Values: {analysis.get('critical_count', 0)}")
+    
+    # Summary
+    summary = analysis.get("summary", {})
+    lines.append("ANALYSIS SUMMARY")
+    lines.append("-" * 70)
+    lines.append(f"  Total Parameters Analyzed    {summary.get('total_parameters', 0)}")
+    lines.append(f"  Abnormal Values              {summary.get('abnormal_count', 0)}")
+    lines.append(f"  Critical Values              {summary.get('critical_count', 0)}")
+    lines.append(f"  Sample Quality Score         {summary.get('quality_score', 0)}%")
     lines.append("")
-
-    if analysis.get('critical_values'):
-        lines.append("!!! CRITICAL VALUES ALERT !!!")
-        lines.append("-" * 40)
-        for cv in analysis['critical_values']:
-            lines.append(f"  {cv['parameter']}: {cv['message']}")
-        lines.append("")
-
+    
+    # Quality
+    quality = analysis.get("quality", {})
     lines.append("SAMPLE QUALITY ASSESSMENT")
-    lines.append("-" * 40)
-    for check in analysis.get('quality_checks', []):
-        severity_label = check.get('severity', 'info').upper()
-        lines.append(f"  [{severity_label}] {check['rule']}")
-        lines.append(f"    Expected: {check['expected']} | Actual: {check['actual']}")
-        lines.append(f"    {check['interpretation']}")
+    lines.append("-" * 70)
+    lines.append(f"  Status: {quality.get('summary', 'Unknown')}")
+    if quality.get("issues"):
+        lines.append("  Issues Found:")
+        for issue in quality["issues"][:3]:
+            severity_mark = "⚠ " if issue.get("severity") == "warning" else "✗ "
+            lines.append(f"    {severity_mark}{issue.get('rule', 'Unknown')}")
+            lines.append(f"       {issue.get('details', '')}")
+    lines.append("")
+    
+    # Critical values
+    critical = analysis.get("critical_values", [])
+    if critical:
+        lines.append("!!! CRITICAL VALUES !!!")
+        lines.append("-" * 70)
+        for cv in critical:
+            lines.append(f"  ✗ {cv['parameter']}: {cv['value']} ({cv['status']})")
+            lines.append(f"    {cv['message']}")
         lines.append("")
-
-    lines.append("DETAILED PARAMETER ANALYSIS")
-    lines.append("-" * 40)
-    for param_name, param_data in analysis.get('parameters', {}).items():
-        classification = param_data.get('classification', {})
-        status_label = classification.get('status', 'unknown').upper()
-        lines.append(f"\n  {param_name}: {param_data['value']} {param_data.get('unit', '')}")
-        lines.append(f"    Status: {status_label}")
-        if classification.get('low') is not None:
-            lines.append(f"    Reference: {classification['low']}-{classification['high']} {classification.get('unit', '')}")
-
-        if param_data.get('differential'):
-            diff = param_data['differential']
-            lines.append(f"\n    Differential Diagnosis: {diff['title']}")
-            for i, d in enumerate(diff.get('differentials', []), 1):
-                lines.append(f"      {i}. {d['condition']}")
-                lines.append(f"         {d['discussion']}")
-
-    if analysis.get('calculated_indices'):
-        lines.append("\n" + "=" * 60)
-        lines.append("CALCULATED INDICES")
-        lines.append("-" * 40)
-        for idx_name, idx_data in analysis['calculated_indices'].items():
-            lines.append(f"  {idx_name}: {idx_data['value']}")
-            lines.append(f"    Formula: {idx_data['formula']}")
-            lines.append(f"    Interpretation: {idx_data['interpretation']}")
-            lines.append(f"    Note: {idx_data['note']}")
+    
+    # Abnormalities by panel
+    panels = analysis.get("panels", {})
+    for panel_name, panel_params in sorted(panels.items()):
+        panel_abnorms = [p for p in panel_params.values() if p.get("classification", {}).get("status") not in ("normal", "unknown", "text_value")]
+        if not panel_abnorms:
+            continue
+        
+        lines.append(f"{panel_name.replace('_', ' ').upper()}")
+        lines.append("-" * 70)
+        for param_name, param_data in sorted(panel_params.items()):
+            status = param_data.get("classification", {}).get("status")
+            if status in ("normal", "unknown", "text_value"):
+                continue
+            
+            value = param_data.get("value")
+            unit = param_data.get("unit", "")
+            message = param_data.get("classification", {}).get("message", "")
+            
+            lines.append(f"  {param_name}")
+            lines.append(f"    Value:     {value} {unit}")
+            lines.append(f"    Status:    {message}")
+            
+            # Differential
+            diff = param_data.get("differential")
+            if diff and diff.get("conditions"):
+                lines.append(f"    Consider:")
+                for cond in diff["conditions"][:3]:
+                    lines.append(f"      • {cond.get('name', 'Unknown')} - {cond.get('note', '')}")
             lines.append("")
+    
+    # Recommendations
+    recommendations = get_clinical_recommendations(analysis)
+    if recommendations:
+        lines.append("CLINICAL RECOMMENDATIONS")
+        lines.append("-" * 70)
+        for rec in recommendations[:5]:
+            priority_mark = "🔴 " if rec["priority"] == "high" else "🟡 " if rec["priority"] == "medium" else "🟢 "
+            lines.append(f"  {priority_mark}[{rec['priority'].upper()}] {rec['category']}")
+            lines.append(f"     {rec['recommendation']}")
+        lines.append("")
+    
+    # Footer
+    lines.append("=" * 70)
+    lines.append(f"Report generated: {summary.get('analysis_date', 'Unknown')}")
+    lines.append("DISCLAIMER: This is an AI-assisted analysis tool for educational purposes.")
+    lines.append("Always consult with a qualified healthcare provider for clinical decisions.")
+    lines.append("=" * 70)
+    
+    return "\n".join(lines)
 
-    lines.append("\n" + "=" * 60)
-    lines.append("DISCLAIMER: This analysis is for educational purposes only.")
-    lines.append("Always consult qualified medical professionals for diagnosis.")
-    lines.append("=" * 60)
 
+# ============================================================================
+# EXPORT FUNCTIONS
+# ============================================================================
+
+def export_to_json(analysis: Dict[str, Any]) -> str:
+    """Export analysis to JSON format."""
+    return json.dumps(analysis, indent=2, default=str)
+
+
+def export_to_csv_flat(analysis: Dict[str, Any]) -> str:
+    """Export parameters to CSV flat format."""
+    lines = ["Parameter,Value,Unit,Panel,Status,Classification"]
+    
+    for param_name, param_data in analysis.get("parameters", {}).items():
+        value = param_data.get("value", "")
+        unit = param_data.get("unit", "")
+        panel = param_data.get("panel", "")
+        classification = param_data.get("classification", {})
+        status = classification.get("status", "")
+        message = classification.get("message", "")
+        
+        lines.append(f'"{param_name}","{value}","{unit}","{panel}","{status}","{message}"')
+    
     return "\n".join(lines)
