@@ -34,7 +34,51 @@ import json
 # ============================================================================
 
 REFERENCE_RANGES = {
-    # ────────────────────────────────────────────────────────────────────
+# Add these constants to utils/analysis_engine.py
+
+PANEL_LABELS = {
+    "CBC": "Complete Blood Count",
+    "LFT": "Liver Function Tests",
+    "KFT": "Kidney Function Tests",
+    "LIPID": "Lipid Profile",
+    "DIABETES": "Diabetes Markers",
+    "TFT": "Thyroid Function Tests",
+    "VIT_D": "Vitamin D",
+    "VIT_B12": "Vitamin B12 / Folate",
+    "URINE_RM": "Urine Routine & Microscopy",
+    "RHEUMA": "Rheumatology Markers",
+    "ONCOLOGY": "Oncology / Tumour Markers",
+}
+
+PANEL_ICONS = {
+    "CBC": "🩸",
+    "LFT": "🏥",
+    "KFT": "🫘",
+    "LIPID": "🧬",
+    "DIABETES": "🩺",
+    "TFT": "🦋",
+    "VIT_D": "☀️",
+    "VIT_B12": "💊",
+    "URINE_RM": "🧪",
+    "RHEUMA": "🦴",
+    "ONCOLOGY": "🔬",
+}
+
+# Map each panel to its parameters
+PANEL_PARAMETER_MAP = {
+    "CBC": ["RBC", "Hemoglobin", "Hematocrit", "MCV", "MCH", "MCHC", "RDW", "RDW_SD", "WBC", "Neutrophils", "Lymphocytes", "Monocytes", "Eosinophils", "Basophils", "Platelets", "MPV", "PDW", "PCT"],
+    "LFT": ["ALT", "AST", "ALP", "GGT", "Bilirubin_Total", "Bilirubin_Direct", "Bilirubin_Indirect", "Albumin", "Total_Protein", "Globulin", "Albumin_Globulin_Ratio", "PT", "INR"],
+    "KFT": ["Creatinine", "BUN", "Urea", "Uric_Acid", "eGFR", "Cystatin_C", "Sodium", "Potassium", "Chloride", "Bicarbonate", "Calcium", "Phosphate", "Magnesium"],
+    "LIPID": ["Total_Cholesterol", "HDL", "LDL", "VLDL", "Triglycerides", "Non_HDL", "TC_HDL_Ratio", "LDL_HDL_Ratio", "ApoA1", "ApoB", "Lp_a"],
+    "DIABETES": ["Fasting_Glucose", "Random_Glucose", "PP_Glucose", "HbA1c", "eAG", "Insulin", "C_Peptide", "HOMA_IR"],
+    "TFT": ["TSH", "T3", "T4", "FT3", "FT4", "Reverse_T3", "T3_Uptake", "Anti_TPO", "Anti_Thyroglobulin", "TSH_Receptor_Ab", "Thyroglobulin"],
+    "VIT_D": ["Vitamin_D_25OH"],
+    "VIT_B12": ["Vitamin_B12", "Folate"],
+    "URINE_RM": ["Color", "Appearance", "pH", "Specific_Gravity", "Protein", "Glucose", "Ketones", "Nitrites", "Leukocyte_Esterase", "RBC", "WBC", "Bacteria", "Crystals", "Casts", "Epithelial_Cells"],
+    "RHEUMA": ["RA_Factor", "Anti_CCP", "ANA", "Anti_dsDNA", "Anti_Smith", "Anti_Sm", "Complement_C3", "Complement_C4", "ESR", "CRP"],
+    "ONCOLOGY": ["AFP", "CEA", "CA_19_9", "CA_125", "PSA", "Beta_hCG"],
+}
+  # ────────────────────────────────────────────────────────────────────
     # CBC Parameters
     # ────────────────────────────────────────────────────────────────────
     "RBC": {
