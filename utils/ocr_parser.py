@@ -349,9 +349,9 @@ def extract_patient_info(text: str) -> Dict[str, str]:
     if not text:
         return info
 
-    # Name
+    # Name — use non-overlapping pattern to prevent ReDoS
     name_match = re.search(
-        r"(?:patient\s*(?:name)?|name)\s*[:=\-]\s*([A-Za-z .\-']{2,40})",
+        r"(?:patient\s*(?:name)?|name)\s*[:=\-]\s*([A-Za-z][A-Za-z.]*(?:[\s\-'][A-Za-z][A-Za-z.]*){0,5})",
         text, re.IGNORECASE,
     )
     if name_match:
