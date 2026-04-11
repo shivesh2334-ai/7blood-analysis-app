@@ -34,6 +34,14 @@ from utils.analysis_engine import (
     calculate_severity,
 )
 
+from utils.config import (
+    AI_MODEL,
+    AI_MAX_TOKENS,
+    DEFAULT_AGE,
+    DEFAULT_SEX,
+    DEFAULT_ACTIVE_PANELS,
+)
+
 __all__ = [
     # OCR
     'process_uploaded_file',
@@ -64,5 +72,12 @@ __all__ = [
     'STATUS_HIGH',
     'STATUS_CRITICALLY_LOW',
     'STATUS_CRITICALLY_HIGH',
+
+    # Config
+    'AI_MODEL',
+    'AI_MAX_TOKENS',
+    'DEFAULT_AGE',
+    'DEFAULT_SEX',
+    'DEFAULT_ACTIVE_PANELS',
 ]
 

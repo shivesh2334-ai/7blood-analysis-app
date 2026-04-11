@@ -1,30 +1,28 @@
-streamlit
-Pillow
-pytesseract
-pdf2image
-PyPDF2
-anthropic
-fpdf2
-pandas
-plotly
-python-dotenv
-streamlit-option-menu
-pdfplumber
-# Core dependencies
-#streamlit>=1.28.0
-numpy
-#pandas>=2.0.0
+# Core
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.15.0
 
 # OCR and Image Processing
-#pytesseract>=0.3.10
-#Pillow>=10.0.0
-pdf2image
-PyMuPDF
-opencv-python
+Pillow>=10.0.0
+pytesseract>=0.3.10
+pdf2image>=1.16.0
+PyPDF2>=3.0.0
+pdfplumber>=0.9.0
+PyMuPDF>=1.22.0
+opencv-python>=4.8.0
 
-# AI Integration (optional)
-#anthropic>=0.8.0
+# PDF Generation
+fpdf2>=2.7.0
+
+# AI Integration
+anthropic>=0.18.0
+
+# UI Enhancements
+streamlit-option-menu>=0.3.6
 
 # Utilities
-python-dateutil
-typing-extensions
+python-dotenv>=1.0.0
+python-dateutil>=2.8.0
+typing-extensions>=4.5.0

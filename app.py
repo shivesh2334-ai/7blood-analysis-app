@@ -8,10 +8,15 @@ CBC · LFT · KFT · Lipid Profile · Diabetes · TFT · Vit D · Vit B12 · Uri
 import re
 import io
 import json
+import logging
 import math
 import datetime
 import streamlit as st
 from typing import Any, Dict, List, Optional
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -47,6 +52,12 @@ except ImportError:
         SEV_NORMAL, SEV_MILD, SEV_MODERATE, SEV_SEVERE, SEV_CRITICAL,
         STATUS_NORMAL,
     )
+
+try:
+    from utils.config import AI_MODEL, AI_MAX_TOKENS
+except ImportError:
+    AI_MODEL = "claude-sonnet-4-20250514"
+    AI_MAX_TOKENS = 2000
 
 # ── Anthropic (optional) ─────────────────────────────────────────────────────
 try:
@@ -246,10 +257,12 @@ SEVERITY_LABELS = {
 
 
 def _sev_colour(sev: int) -> str:
+    """Return the hex colour string associated with a severity level."""
     return SEVERITY_COLOURS.get(sev, "#8b949e")
 
 
 def _status_badge(status: str) -> str:
+    """Return an HTML badge ``<span>`` for the given parameter status."""
     mapping = {
         "Normal": "badge-normal", "Low": "badge-low",
         "High": "badge-high",
@@ -264,6 +277,7 @@ def _status_badge(status: str) -> str:
 
 
 def _flag_class(status: str) -> str:
+    """Return the CSS class name for a parameter flag based on its status."""
     mapping = {
         "Normal": "param-flag-normal",
         "Low": "param-flag-low",
@@ -499,8 +513,12 @@ with tab_upload:
                                 f"{len(found)} values found"
                             )
 
+                except ValueError as e:
+                    st.error(f"Unsupported file type: {e}")
+                    logger.warning("File upload validation error: %s", e)
                 except Exception as e:
                     st.error(f"Extraction error: {e}")
+                    logger.exception("Unexpected error during file processing.")
 
         # Manual text paste fallback
         with st.expander("Or paste raw lab text"):
@@ -873,14 +891,23 @@ Be concise but thorough. Use clear medical terminology. Always note that this is
                 try:
                     client = anthropic.Anthropic(api_key=st.session_state.api_key)
                     response = client.messages.create(
-                        model="claude-opus-4-5",
-                        max_tokens=2000,
+                        model=AI_MODEL,
+                        max_tokens=AI_MAX_TOKENS,
                         messages=[{"role": "user", "content": prompt}],
                     )
                     ai_text = response.content[0].text
                     st.session_state.ai_review = ai_text
+                except anthropic.AuthenticationError:
+                    st.error("Invalid API key. Please check your Claude API key in the sidebar.")
+                    logger.warning("Anthropic authentication failed.")
+                    st.session_state.ai_review = ""
+                except anthropic.RateLimitError:
+                    st.error("API rate limit reached. Please try again in a few moments.")
+                    logger.warning("Anthropic rate limit hit.")
+                    st.session_state.ai_review = ""
                 except Exception as e:
                     st.error(f"API error: {e}")
+                    logger.exception("Unexpected error during AI review.")
                     st.session_state.ai_review = ""
 
         if st.session_state.ai_review:
