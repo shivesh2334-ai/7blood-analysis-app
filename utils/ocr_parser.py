@@ -1,1075 +1,542 @@
 """
-Comprehensive Lab Investigation Analysis Tool
-=============================================
-AI-Powered Multi-Panel Clinical Laboratory Analysis Platform
-CBC · LFT · KFT · Lipid Profile · Diabetes · TFT · Vit D · Vit B12 · Urine R/M · Rheumatology · Oncology
+OCR Parser Module
+=================
+Extracts text from uploaded lab report files (PDF/images) using OCR,
+then parses clinical laboratory parameter values and patient information.
+
+Functions:
+    process_uploaded_file  -- End-to-end: file → (text, params, grouped, patient_info)
+    preprocess_text        -- Clean and normalise raw OCR text
+    parse_parameters       -- Extract parameter name/value pairs from text
+    extract_patient_info   -- Pull patient demographic fields from text
 """
 
 import re
 import io
-import json
-import math
-import datetime
-import streamlit as st
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Any, Dict, List, Optional, Tuple
 
-# ── Page config ──────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="LabIQ — Lab Analysis Platform",
-    page_icon="🔬",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+logger = logging.getLogger(__name__)
 
-# ── Internal imports ─────────────────────────────────────────────────────────
-try:
-    from utils.ocr_parser import (
-        process_uploaded_file, parse_parameters,
-        extract_patient_info, preprocess_text,
-    )
-except ImportError:
-    from ocr_parser import (
-        process_uploaded_file, parse_parameters,
-        extract_patient_info, preprocess_text,
-    )
+# ---------------------------------------------------------------------------
+# Parameter aliases — maps common lab-report labels to canonical keys used
+# by the analysis engine (keys of REFERENCE_RANGES).
+# ---------------------------------------------------------------------------
+PARAMETER_ALIASES: Dict[str, str] = {
+    # CBC
+    "rbc": "RBC", "rbc count": "RBC", "red blood cell": "RBC",
+    "red blood cell count": "RBC", "red blood cells": "RBC",
+    "haemoglobin": "Hemoglobin", "hemoglobin": "Hemoglobin", "hgb": "Hemoglobin",
+    "hb": "Hemoglobin",
+    "hematocrit": "Hematocrit", "haematocrit": "Hematocrit", "hct": "Hematocrit",
+    "pcv": "Hematocrit",
+    "mcv": "MCV", "mean corpuscular volume": "MCV",
+    "mch": "MCH", "mean corpuscular hemoglobin": "MCH",
+    "mean corpuscular haemoglobin": "MCH",
+    "mchc": "MCHC", "mean corpuscular hemoglobin concentration": "MCHC",
+    "rdw": "RDW_CV", "rdw-cv": "RDW_CV", "rdw cv": "RDW_CV",
+    "rdw-sd": "RDW_SD", "rdw sd": "RDW_SD",
+    "wbc": "WBC", "wbc count": "WBC", "white blood cell": "WBC",
+    "white blood cell count": "WBC", "white blood cells": "WBC",
+    "total wbc count": "WBC", "total leucocyte count": "WBC", "tlc": "WBC",
+    "neutrophils": "Neutrophils", "neutrophil": "Neutrophils",
+    "lymphocytes": "Lymphocytes", "lymphocyte": "Lymphocytes",
+    "monocytes": "Monocytes", "monocyte": "Monocytes",
+    "eosinophils": "Eosinophils", "eosinophil": "Eosinophils",
+    "basophils": "Basophils", "basophil": "Basophils",
+    "bands": "Bands", "band neutrophils": "Bands",
+    "platelets": "Platelets", "platelet count": "Platelets", "plt": "Platelets",
+    "mpv": "MPV", "mean platelet volume": "MPV",
+    "pdw": "PDW", "platelet distribution width": "PDW",
+    "pct": "PCT", "plateletcrit": "PCT",
+    "esr": "ESR", "erythrocyte sedimentation rate": "ESR", "sed rate": "ESR",
+    "reticulocytes": "Reticulocytes", "reticulocyte count": "Reticulocytes",
+    "retic count": "Reticulocytes",
+    "anc": "ANC", "absolute neutrophil count": "ANC",
+    "alc": "ALC", "absolute lymphocyte count": "ALC",
 
-try:
-    from utils.analysis_engine import (
-        REFERENCE_RANGES, PANEL_PARAMETER_MAP, PANEL_LABELS, PANEL_ICONS,
-        analyze_panel, analyze_all, get_overall_severity,
-        SEV_NORMAL, SEV_MILD, SEV_MODERATE, SEV_SEVERE, SEV_CRITICAL,
-        STATUS_NORMAL,
-    )
-except ImportError:
-    from analysis_engine import (
-        REFERENCE_RANGES, PANEL_PARAMETER_MAP, PANEL_LABELS, PANEL_ICONS,
-        analyze_panel, analyze_all, get_overall_severity,
-        SEV_NORMAL, SEV_MILD, SEV_MODERATE, SEV_SEVERE, SEV_CRITICAL,
-        STATUS_NORMAL,
-    )
+    # LFT
+    "alt": "ALT", "sgpt": "ALT", "alanine aminotransferase": "ALT",
+    "alanine transaminase": "ALT",
+    "ast": "AST", "sgot": "AST", "aspartate aminotransferase": "AST",
+    "aspartate transaminase": "AST",
+    "alp": "ALP", "alkaline phosphatase": "ALP",
+    "ggt": "GGT", "gamma gt": "GGT", "gamma-glutamyl transferase": "GGT",
+    "gamma glutamyl transferase": "GGT",
+    "ldh": "LDH", "lactate dehydrogenase": "LDH",
+    "total bilirubin": "Total_Bilirubin", "bilirubin total": "Total_Bilirubin",
+    "bilirubin (total)": "Total_Bilirubin", "t. bilirubin": "Total_Bilirubin",
+    "direct bilirubin": "Direct_Bilirubin", "bilirubin direct": "Direct_Bilirubin",
+    "conjugated bilirubin": "Direct_Bilirubin",
+    "indirect bilirubin": "Indirect_Bilirubin", "bilirubin indirect": "Indirect_Bilirubin",
+    "unconjugated bilirubin": "Indirect_Bilirubin",
+    "total protein": "Total_Protein", "serum protein": "Total_Protein",
+    "albumin": "Albumin", "serum albumin": "Albumin",
+    "globulin": "Globulin",
+    "a/g ratio": "AG_Ratio", "ag ratio": "AG_Ratio",
+    "albumin/globulin ratio": "AG_Ratio", "a:g ratio": "AG_Ratio",
+    "pt": "PT", "prothrombin time": "PT",
+    "inr": "INR", "international normalized ratio": "INR",
+    "aptt": "APTT", "activated partial thromboplastin time": "APTT",
+    "ptt": "APTT",
+    "serum ammonia": "Serum_Ammonia", "ammonia": "Serum_Ammonia",
 
-# ── Anthropic (optional) ─────────────────────────────────────────────────────
-try:
-    import anthropic
-    ANTHROPIC_AVAILABLE = True
-except ImportError:
-    ANTHROPIC_AVAILABLE = False
+    # KFT / Renal
+    "serum creatinine": "Serum_Creatinine", "creatinine": "Serum_Creatinine",
+    "s. creatinine": "Serum_Creatinine",
+    "bun": "BUN", "blood urea nitrogen": "BUN",
+    "serum urea": "Serum_Urea", "urea": "Serum_Urea", "blood urea": "Serum_Urea",
+    "serum uric acid": "Serum_Uric_Acid", "uric acid": "Serum_Uric_Acid",
+    "egfr": "eGFR", "gfr": "eGFR", "estimated gfr": "eGFR",
+    "glomerular filtration rate": "eGFR",
+    "serum sodium": "Serum_Sodium", "sodium": "Serum_Sodium", "na+": "Serum_Sodium",
+    "na": "Serum_Sodium",
+    "serum potassium": "Serum_Potassium", "potassium": "Serum_Potassium",
+    "k+": "Serum_Potassium", "k": "Serum_Potassium",
+    "serum chloride": "Serum_Chloride", "chloride": "Serum_Chloride",
+    "cl": "Serum_Chloride",
+    "serum bicarbonate": "Serum_Bicarbonate", "bicarbonate": "Serum_Bicarbonate",
+    "hco3": "Serum_Bicarbonate",
+    "serum calcium": "Serum_Calcium", "calcium": "Serum_Calcium", "ca": "Serum_Calcium",
+    "ionised calcium": "Ionised_Calcium", "ionized calcium": "Ionised_Calcium",
+    "ionic calcium": "Ionised_Calcium",
+    "serum phosphorus": "Serum_Phosphorus", "phosphorus": "Serum_Phosphorus",
+    "phosphate": "Serum_Phosphorus",
+    "serum magnesium": "Serum_Magnesium", "magnesium": "Serum_Magnesium",
+    "mg": "Serum_Magnesium",
+    "acr": "ACR", "albumin creatinine ratio": "ACR",
+    "albumin-to-creatinine ratio": "ACR",
+    "urine microalbumin": "Urine_Microalbumin", "microalbumin": "Urine_Microalbumin",
+    "cystatin c": "Cystatin_C", "cystatin-c": "Cystatin_C",
 
-# ─────────────────────────────────────────────────────────────────────────────
-# THEME & CSS
-# ─────────────────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&display=swap');
+    # Lipid profile
+    "total cholesterol": "Total_Cholesterol", "cholesterol": "Total_Cholesterol",
+    "cholesterol total": "Total_Cholesterol", "serum cholesterol": "Total_Cholesterol",
+    "hdl cholesterol": "HDL_Cholesterol", "hdl": "HDL_Cholesterol",
+    "hdl-c": "HDL_Cholesterol", "hdl-cholesterol": "HDL_Cholesterol",
+    "ldl cholesterol": "LDL_Cholesterol", "ldl": "LDL_Cholesterol",
+    "ldl-c": "LDL_Cholesterol", "ldl-cholesterol": "LDL_Cholesterol",
+    "vldl cholesterol": "VLDL_Cholesterol", "vldl": "VLDL_Cholesterol",
+    "vldl-c": "VLDL_Cholesterol",
+    "triglycerides": "Triglycerides", "triglyceride": "Triglycerides",
+    "tg": "Triglycerides", "trigs": "Triglycerides",
+    "non-hdl cholesterol": "Non_HDL_Cholesterol", "non hdl cholesterol": "Non_HDL_Cholesterol",
+    "tc/hdl ratio": "TC_HDL_Ratio", "tc:hdl ratio": "TC_HDL_Ratio",
+    "total cholesterol/hdl ratio": "TC_HDL_Ratio",
+    "ldl/hdl ratio": "LDL_HDL_Ratio", "ldl:hdl ratio": "LDL_HDL_Ratio",
+    "lipoprotein a": "Lipoprotein_a", "lipoprotein(a)": "Lipoprotein_a",
+    "lp(a)": "Lipoprotein_a",
+    "apoa1": "ApoA1", "apolipoprotein a1": "ApoA1", "apo a-1": "ApoA1",
+    "apob": "ApoB", "apolipoprotein b": "ApoB", "apo b": "ApoB",
 
-:root {
-  --bg:        #0d1117;
-  --surface:   #161b22;
-  --surface2:  #1c2330;
-  --border:    #30363d;
-  --accent:    #2da44e;
-  --accent2:   #388bfd;
-  --warn:      #e3b341;
-  --danger:    #f85149;
-  --critical:  #ff6e40;
-  --text:      #e6edf3;
-  --text2:     #8b949e;
-  --text3:     #6e7681;
-  --normal:    #3fb950;
+    # Diabetes
+    "fasting blood glucose": "Fasting_Blood_Glucose", "fasting glucose": "Fasting_Blood_Glucose",
+    "fbg": "Fasting_Blood_Glucose", "fbs": "Fasting_Blood_Glucose",
+    "fasting blood sugar": "Fasting_Blood_Glucose",
+    "postprandial glucose": "Postprandial_Glucose", "ppg": "Postprandial_Glucose",
+    "pp glucose": "Postprandial_Glucose", "ppbs": "Postprandial_Glucose",
+    "postprandial blood sugar": "Postprandial_Glucose",
+    "random blood glucose": "Random_Blood_Glucose", "rbg": "Random_Blood_Glucose",
+    "random blood sugar": "Random_Blood_Glucose", "rbs": "Random_Blood_Glucose",
+    "hba1c": "HbA1c", "glycated hemoglobin": "HbA1c", "glycated haemoglobin": "HbA1c",
+    "a1c": "HbA1c", "hemoglobin a1c": "HbA1c",
+    "eag": "eAG", "estimated average glucose": "eAG",
+    "fasting insulin": "Fasting_Insulin", "insulin fasting": "Fasting_Insulin",
+    "homa-ir": "HOMA_IR", "homa ir": "HOMA_IR",
+    "c-peptide": "C_Peptide", "c peptide": "C_Peptide",
+
+    # Thyroid
+    "tsh": "TSH", "thyroid stimulating hormone": "TSH",
+    "free t3": "Free_T3", "ft3": "Free_T3",
+    "total t3": "Total_T3", "t3": "Total_T3",
+    "free t4": "Free_T4", "ft4": "Free_T4",
+    "total t4": "Total_T4", "t4": "Total_T4",
+    "anti-tpo": "Anti_TPO", "anti tpo": "Anti_TPO", "tpo antibodies": "Anti_TPO",
+    "anti-thyroglobulin": "Anti_Thyroglobulin", "anti thyroglobulin": "Anti_Thyroglobulin",
+    "tsh receptor antibodies": "TSH_Receptor_Ab", "trab": "TSH_Receptor_Ab",
+    "thyroglobulin": "Thyroglobulin",
+    "calcitonin": "Calcitonin",
+
+    # Vitamins
+    "vitamin d": "Vitamin_D_25OH", "vit d": "Vitamin_D_25OH",
+    "25-oh vitamin d": "Vitamin_D_25OH", "25 oh vitamin d": "Vitamin_D_25OH",
+    "vitamin d 25-oh": "Vitamin_D_25OH", "vitamin d3": "Vitamin_D3",
+    "cholecalciferol": "Vitamin_D3",
+    "pth": "PTH", "parathyroid hormone": "PTH",
+    "vitamin b12": "Vitamin_B12", "vit b12": "Vitamin_B12",
+    "cyanocobalamin": "Vitamin_B12", "cobalamin": "Vitamin_B12",
+    "serum folate": "Serum_Folate", "folate": "Serum_Folate",
+    "folic acid": "Serum_Folate",
+    "rbc folate": "RBC_Folate", "red cell folate": "RBC_Folate",
+    "homocysteine": "Homocysteine",
+
+    # Rheumatology
+    "ra factor": "RA_Factor", "rheumatoid factor": "RA_Factor", "rf": "RA_Factor",
+    "anti-ccp": "Anti_CCP", "anti ccp": "Anti_CCP", "acpa": "Anti_CCP",
+    "crp": "CRP", "c-reactive protein": "CRP", "c reactive protein": "CRP",
+    "hs-crp": "hs_CRP", "hs crp": "hs_CRP",
+    "high sensitivity crp": "hs_CRP",
+    "anti-dsdna": "Anti_dsDNA", "anti dsdna": "Anti_dsDNA",
+    "c3 complement": "C3_Complement", "c3": "C3_Complement",
+    "complement c3": "C3_Complement",
+    "c4 complement": "C4_Complement", "c4": "C4_Complement",
+    "complement c4": "C4_Complement",
+    "aso titre": "ASO_Titre", "aso": "ASO_Titre",
+    "anti-streptolysin o": "ASO_Titre",
+
+    # Iron studies
+    "ferritin": "Ferritin", "serum ferritin": "Ferritin",
+    "serum iron": "Serum_Iron", "iron": "Serum_Iron",
+    "tibc": "TIBC", "total iron binding capacity": "TIBC",
+    "transferrin saturation": "Transferrin_Saturation",
+    "tsat": "Transferrin_Saturation",
+
+    # Oncology markers
+    "psa": "PSA_Total", "psa total": "PSA_Total", "total psa": "PSA_Total",
+    "psa free": "PSA_Free", "free psa": "PSA_Free",
+    "cea": "CEA", "carcinoembryonic antigen": "CEA",
+    "ca-125": "CA_125", "ca 125": "CA_125",
+    "ca-19-9": "CA_19_9", "ca 19-9": "CA_19_9", "ca19.9": "CA_19_9",
+    "ca-15-3": "CA_15_3", "ca 15-3": "CA_15_3",
+    "ca-72-4": "CA_72_4", "ca 72-4": "CA_72_4",
+    "afp": "AFP", "alpha-fetoprotein": "AFP", "alpha fetoprotein": "AFP",
+    "beta hcg": "Beta_HCG", "beta-hcg": "Beta_HCG", "bhcg": "Beta_HCG",
+    "nse": "NSE", "neuron specific enolase": "NSE",
+    "cyfra 21-1": "CYFRA_21_1", "cyfra": "CYFRA_21_1",
+    "scc antigen": "SCC_Antigen", "scc": "SCC_Antigen",
+    "chromogranin a": "Chromogranin_A", "cga": "Chromogranin_A",
+    "he4": "HE4",
+
+    # Urine
+    "urine ph": "Urine_pH",
+    "urine specific gravity": "Urine_Specific_Gravity",
+    "specific gravity": "Urine_Specific_Gravity",
+    "urine pus cells": "Urine_Pus_Cells", "pus cells": "Urine_Pus_Cells",
+    "urine rbc": "Urine_RBC",
 }
 
-html, body, [class*="css"] {
-  font-family: 'DM Sans', sans-serif;
-  color: var(--text);
-  background: var(--bg);
-}
-
-h1, h2, h3 { font-family: 'DM Serif Display', Georgia, serif; }
-
-/* Sidebar */
-section[data-testid="stSidebar"] {
-  background: var(--surface) !important;
-  border-right: 1px solid var(--border);
-}
-section[data-testid="stSidebar"] * { color: var(--text) !important; }
-
-/* Main */
-.main .block-container { padding: 1.5rem 2rem; max-width: 1400px; }
-
-/* Cards */
-.lab-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.25rem 1.5rem;
-  margin-bottom: 1rem;
-}
-.lab-card-header {
-  display: flex; align-items: center; gap: .6rem;
-  font-size: 1.05rem; font-weight: 600;
-  margin-bottom: .75rem; padding-bottom: .5rem;
-  border-bottom: 1px solid var(--border);
-}
-
-/* Status badges */
-.badge-normal   { background:#0f3d2a; color:#3fb950; border:1px solid #2da44e; border-radius:20px; padding:2px 10px; font-size:.75rem; font-weight:600; }
-.badge-low      { background:#1a2d4a; color:#79c0ff; border:1px solid #388bfd; border-radius:20px; padding:2px 10px; font-size:.75rem; font-weight:600; }
-.badge-high     { background:#3a2000; color:#e3b341; border:1px solid #bb8009; border-radius:20px; padding:2px 10px; font-size:.75rem; font-weight:600; }
-.badge-critical { background:#3d0f0f; color:#f85149; border:1px solid #da3633; border-radius:20px; padding:2px 10px; font-size:.75rem; font-weight:600; }
-.badge-borderline { background:#2d2000; color:#ffa657; border:1px solid #e36209; border-radius:20px; padding:2px 10px; font-size:.75rem; font-weight:600; }
-
-/* Parameter row */
-.param-row {
-  display:grid; grid-template-columns:2.5fr 1fr 1.2fr 1.8fr;
-  align-items:center; gap:.5rem; padding:.45rem .5rem;
-  border-radius:8px; margin-bottom:3px; font-size:.875rem;
-}
-.param-row:hover { background: var(--surface2); }
-.param-name { font-weight:500; color:var(--text); }
-.param-value { font-weight:700; color:var(--text); text-align:right; }
-.param-range { color:var(--text3); font-size:.78rem; }
-.param-flag-normal   { color:var(--normal); font-weight:600; }
-.param-flag-low      { color:var(--accent2); font-weight:600; }
-.param-flag-high     { color:var(--warn); font-weight:600; }
-.param-flag-critical { color:var(--danger); font-weight:700; }
-
-/* Alert boxes */
-.alert-critical { background:#3d0f0f; border:1px solid #da3633; border-radius:8px; padding:.75rem 1rem; margin:.4rem 0; color:#f85149; }
-.alert-warn     { background:#2d2200; border:1px solid #bb8009; border-radius:8px; padding:.75rem 1rem; margin:.4rem 0; color:#e3b341; }
-.alert-info     { background:#0d2238; border:1px solid #1f6feb; border-radius:8px; padding:.75rem 1rem; margin:.4rem 0; color:#79c0ff; }
-.alert-ok       { background:#0f3d2a; border:1px solid #2da44e; border-radius:8px; padding:.75rem 1rem; margin:.4rem 0; color:#3fb950; }
-
-/* Tabs */
-.stTabs [data-baseweb="tab-list"] {
-  background: var(--surface); border-radius:10px;
-  border: 1px solid var(--border); padding: 4px; gap: 2px;
-}
-.stTabs [data-baseweb="tab"] {
-  background: transparent; border-radius: 7px;
-  color: var(--text2); font-weight: 500; padding: .4rem 1.1rem;
-}
-.stTabs [aria-selected="true"] {
-  background: var(--accent) !important; color: white !important;
-}
-
-/* Buttons */
-.stButton>button {
-  background: var(--accent); color: white; border: none;
-  border-radius: 8px; font-weight: 600; padding: .45rem 1.2rem;
-  transition: all .2s;
-}
-.stButton>button:hover { background: #2ea043; transform: translateY(-1px); }
-
-/* Metric override */
-[data-testid="stMetricValue"] { color: var(--text) !important; }
-[data-testid="stMetricLabel"] { color: var(--text2) !important; }
-[data-testid="stMetricDelta"] { font-size:.8rem !important; }
-
-/* Number inputs */
-.stNumberInput input {
-  background: var(--surface2) !important;
-  border: 1px solid var(--border) !important;
-  color: var(--text) !important; border-radius: 8px !important;
-}
-
-/* Selectbox / multiselect */
-.stSelectbox>div, .stMultiSelect>div {
-  background: var(--surface2) !important; color: var(--text) !important;
-}
-
-/* Text input */
-.stTextInput input, .stTextArea textarea {
-  background: var(--surface2) !important;
-  border: 1px solid var(--border) !important;
-  color: var(--text) !important; border-radius: 8px !important;
-}
-
-/* File uploader */
-[data-testid="stFileUploader"] {
-  background: var(--surface2); border: 2px dashed var(--border);
-  border-radius: 12px;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--surface); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-/* Print report section */
-.report-header {
-  text-align:center; padding: 1.5rem 0;
-  border-bottom: 2px solid var(--accent);
-  margin-bottom: 1.5rem;
-}
-.divider { border:none; border-top:1px solid var(--border); margin:1rem 0; }
-</style>
-""", unsafe_allow_html=True)
+# Build a sorted list for regex matching (longer aliases first to avoid partial matches)
+_SORTED_ALIASES = sorted(PARAMETER_ALIASES.keys(), key=len, reverse=True)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SESSION STATE INIT
-# ─────────────────────────────────────────────────────────────────────────────
-def _init_state():
-    defaults = {
-        "extracted_text": "",
-        "parsed_values":  {},
-        "patient_info":   {},
-        "analysis_results": {},
-        "ai_review": "",
-        "active_panels": ["CBC", "LFT", "KFT", "LIPID", "DIABETES", "TFT"],
-        "api_key": "",
-        "sex": "male",
-        "age": 35,
-        "manual_values": {},
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
+# ---------------------------------------------------------------------------
+# Text preprocessing
+# ---------------------------------------------------------------------------
 
-_init_state()
+def preprocess_text(raw_text: str) -> str:
+    """Clean and normalise raw OCR text for parameter extraction.
 
+    Handles common OCR artefacts such as extra whitespace, inconsistent
+    separators, and unicode quirks.
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
-SEVERITY_COLOURS = {
-    SEV_NORMAL:   "#3fb950",
-    SEV_MILD:     "#e3b341",
-    SEV_MODERATE: "#ffa657",
-    SEV_SEVERE:   "#f85149",
-    SEV_CRITICAL: "#ff6e40",
-}
-SEVERITY_LABELS = {
-    SEV_NORMAL: "Normal", SEV_MILD: "Mild", SEV_MODERATE: "Moderate",
-    SEV_SEVERE: "Severe", SEV_CRITICAL: "Critical",
-}
+    Args:
+        raw_text: Raw string extracted from OCR or pasted by user.
 
+    Returns:
+        Normalised text suitable for ``parse_parameters``.
+    """
+    if not raw_text:
+        return ""
 
-def _sev_colour(sev: int) -> str:
-    return SEVERITY_COLOURS.get(sev, "#8b949e")
+    text = raw_text
+
+    # Normalise unicode dashes, bullets, and whitespace
+    text = text.replace("\u2013", "-").replace("\u2014", "-")
+    text = text.replace("\u2022", " ").replace("\u00b7", " ")
+    text = text.replace("\u2019", "'").replace("\u2018", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+
+    # Collapse multiple spaces / tabs but keep newlines
+    text = re.sub(r"[^\S\n]+", " ", text)
+
+    # Normalise line endings
+    text = re.sub(r"\r\n?", "\n", text)
+
+    # Remove very long runs of the same character (OCR artefacts)
+    text = re.sub(r"(.)\1{10,}", r"\1\1\1", text)
+
+    return text.strip()
 
 
-def _status_badge(status: str) -> str:
-    mapping = {
-        "Normal": "badge-normal", "Low": "badge-low",
-        "High": "badge-high",
-        "Critically Low": "badge-critical", "Critically High": "badge-critical",
-        "Borderline": "badge-borderline",
-    }
-    cls = mapping.get(status, "badge-normal")
-    icons = {"Normal": "✓", "Low": "↓", "High": "↑",
-              "Critically Low": "⚠", "Critically High": "⚠", "Borderline": "~"}
-    icon = icons.get(status, "·")
-    return f'<span class="{cls}">{icon} {status}</span>'
+# ---------------------------------------------------------------------------
+# Parameter extraction
+# ---------------------------------------------------------------------------
+
+# Regex to capture a floating-point or integer number
+_NUM_RE = r"(\d+(?:\.\d+)?)"
 
 
-def _flag_class(status: str) -> str:
-    mapping = {
-        "Normal": "param-flag-normal",
-        "Low": "param-flag-low",
-        "High": "param-flag-high",
-    }
-    if "Critical" in status:
-        return "param-flag-critical"
-    return mapping.get(status, "param-flag-normal")
+def parse_parameters(text: str) -> Dict[str, Dict[str, Any]]:
+    """Extract laboratory parameter values from preprocessed text.
 
+    Scans the text for known parameter names (via ``PARAMETER_ALIASES``)
+    followed by a numeric value.  Returns a dictionary keyed by the
+    canonical parameter name with sub-keys ``"value"`` and ``"raw_match"``.
 
-def safe_number_input(label, *, min_value=0.0, max_value=999_999.0,
-                      value=0.0, step=0.01, fmt=None, key=None, help=None):
-    """Crash-proof number_input that always clamps value into [min, max]."""
-    lo = float(min_value) if min_value is not None else 0.0
-    hi = float(max_value) if max_value is not None else 999_999.0
-    if lo > hi:
-        lo, hi = hi, lo
-    v = float(value) if value is not None and not math.isnan(float(value if value else 0)) else lo
-    v = max(lo, min(hi, v))
-    st_fmt = fmt or ("%.3f" if step < 0.01 else "%.2f" if step < 1 else "%.1f")
-    kwargs = dict(label=label, min_value=lo, max_value=hi,
-                  value=v, step=float(step), format=st_fmt)
-    if key:   kwargs["key"]  = key
-    if help:  kwargs["help"] = help
-    return st.number_input(**kwargs)
+    Longer aliases are matched first; overlapping text spans are skipped
+    to prevent short aliases (e.g. "t4") from shadowing longer matches
+    (e.g. "free t4").
 
+    Args:
+        text: Preprocessed lab report text (output of ``preprocess_text``).
 
-# Widget bounds per parameter (never let max_value be the normal ceiling)
-_WIDGET_BOUNDS = {
-    "RBC": (0.0, 15.0, 0.01), "Hemoglobin": (0.0, 25.0, 0.1),
-    "Hematocrit": (0.0, 70.0, 0.1), "MCV": (0.0, 150.0, 0.1),
-    "MCH": (0.0, 60.0, 0.1), "MCHC": (0.0, 45.0, 0.1),
-    "RDW_CV": (0.0, 30.0, 0.1), "RDW_SD": (0.0, 80.0, 0.1),
-    "WBC": (0.0, 200.0, 0.1), "Neutrophils": (0.0, 100.0, 0.1),
-    "Lymphocytes": (0.0, 100.0, 0.1), "Monocytes": (0.0, 100.0, 0.1),
-    "Eosinophils": (0.0, 100.0, 0.1), "Basophils": (0.0, 100.0, 0.1),
-    "Bands": (0.0, 100.0, 0.1), "Platelets": (0.0, 2000.0, 1.0),
-    "MPV": (0.0, 20.0, 0.1), "PDW": (0.0, 30.0, 0.1), "PCT": (0.0, 5.0, 0.01),
-    "ESR": (0.0, 150.0, 1.0), "Reticulocytes": (0.0, 10.0, 0.01),
-    "ANC": (0.0, 50.0, 0.1), "ALC": (0.0, 50.0, 0.1),
-    "ALT": (0.0, 5000.0, 1.0), "AST": (0.0, 5000.0, 1.0),
-    "ALP": (0.0, 2000.0, 1.0), "GGT": (0.0, 2000.0, 1.0), "LDH": (0.0, 5000.0, 1.0),
-    "Total_Bilirubin": (0.0, 50.0, 0.01), "Direct_Bilirubin": (0.0, 30.0, 0.01),
-    "Indirect_Bilirubin": (0.0, 30.0, 0.01), "Total_Protein": (0.0, 15.0, 0.1),
-    "Albumin": (0.0, 10.0, 0.1), "Globulin": (0.0, 10.0, 0.1),
-    "AG_Ratio": (0.0, 5.0, 0.01), "PT": (0.0, 120.0, 0.1),
-    "INR": (0.0, 15.0, 0.01), "APTT": (0.0, 120.0, 0.1),
-    "Serum_Ammonia": (0.0, 500.0, 1.0),
-    "Serum_Creatinine": (0.0, 50.0, 0.01), "BUN": (0.0, 300.0, 1.0),
-    "Serum_Urea": (0.0, 500.0, 1.0), "Serum_Uric_Acid": (0.0, 30.0, 0.1),
-    "eGFR": (0.0, 200.0, 1.0), "Serum_Sodium": (80.0, 180.0, 1.0),
-    "Serum_Potassium": (1.0, 10.0, 0.1), "Serum_Chloride": (70.0, 130.0, 1.0),
-    "Serum_Bicarbonate": (0.0, 60.0, 1.0), "Serum_Calcium": (0.0, 20.0, 0.1),
-    "Ionised_Calcium": (0.0, 5.0, 0.01), "Serum_Phosphorus": (0.0, 20.0, 0.1),
-    "Serum_Magnesium": (0.0, 10.0, 0.1), "ACR": (0.0, 5000.0, 1.0),
-    "Urine_Microalbumin": (0.0, 5000.0, 1.0), "Cystatin_C": (0.0, 10.0, 0.01),
-    "Total_Cholesterol": (0.0, 800.0, 1.0), "HDL_Cholesterol": (0.0, 200.0, 1.0),
-    "LDL_Cholesterol": (0.0, 600.0, 1.0), "VLDL_Cholesterol": (0.0, 200.0, 1.0),
-    "Triglycerides": (0.0, 5000.0, 1.0), "Non_HDL_Cholesterol": (0.0, 600.0, 1.0),
-    "TC_HDL_Ratio": (0.0, 20.0, 0.01), "LDL_HDL_Ratio": (0.0, 15.0, 0.01),
-    "Lipoprotein_a": (0.0, 500.0, 1.0), "ApoA1": (0.0, 400.0, 1.0), "ApoB": (0.0, 400.0, 1.0),
-    "Fasting_Blood_Glucose": (0.0, 600.0, 1.0), "Postprandial_Glucose": (0.0, 600.0, 1.0),
-    "Random_Blood_Glucose": (0.0, 600.0, 1.0), "HbA1c": (0.0, 20.0, 0.1),
-    "eAG": (0.0, 600.0, 1.0), "Fasting_Insulin": (0.0, 300.0, 0.1),
-    "HOMA_IR": (0.0, 50.0, 0.01), "C_Peptide": (0.0, 20.0, 0.01),
-    "TSH": (0.0, 100.0, 0.01), "Free_T3": (0.0, 30.0, 0.01),
-    "Total_T3": (0.0, 500.0, 1.0), "Free_T4": (0.0, 10.0, 0.01),
-    "Total_T4": (0.0, 30.0, 0.1), "Anti_TPO": (0.0, 10000.0, 1.0),
-    "Anti_Thyroglobulin": (0.0, 10000.0, 1.0), "TSH_Receptor_Ab": (0.0, 100.0, 0.01),
-    "Thyroglobulin": (0.0, 10000.0, 1.0), "Calcitonin": (0.0, 500.0, 0.1),
-    "Vitamin_D_25OH": (0.0, 200.0, 0.1), "Vitamin_D3": (0.0, 200.0, 0.1),
-    "PTH": (0.0, 2000.0, 1.0),
-    "Vitamin_B12": (0.0, 3000.0, 1.0), "Serum_Folate": (0.0, 60.0, 0.1),
-    "RBC_Folate": (0.0, 1500.0, 1.0), "Homocysteine": (0.0, 200.0, 0.1),
-    "RA_Factor": (0.0, 500.0, 1.0), "Anti_CCP": (0.0, 500.0, 1.0),
-    "CRP": (0.0, 500.0, 0.1), "hs_CRP": (0.0, 100.0, 0.01),
-    "Anti_dsDNA": (0.0, 1000.0, 1.0), "C3_Complement": (0.0, 300.0, 1.0),
-    "C4_Complement": (0.0, 100.0, 1.0), "ASO_Titre": (0.0, 2000.0, 1.0),
-    "Ferritin": (0.0, 50000.0, 1.0), "Serum_Iron": (0.0, 500.0, 1.0),
-    "TIBC": (0.0, 1000.0, 1.0), "Transferrin_Saturation": (0.0, 100.0, 0.1),
-    "PSA_Total": (0.0, 10000.0, 0.01), "PSA_Free": (0.0, 1000.0, 0.01),
-    "CEA": (0.0, 1000.0, 0.1), "CA_125": (0.0, 10000.0, 1.0),
-    "CA_19_9": (0.0, 10000.0, 1.0), "CA_15_3": (0.0, 1000.0, 1.0),
-    "CA_72_4": (0.0, 500.0, 0.1), "AFP": (0.0, 100000.0, 1.0),
-    "Beta_HCG": (0.0, 1000000.0, 1.0), "NSE": (0.0, 1000.0, 0.1),
-    "CYFRA_21_1": (0.0, 500.0, 0.1), "SCC_Antigen": (0.0, 100.0, 0.1),
-    "Chromogranin_A": (0.0, 10000.0, 1.0), "HE4": (0.0, 3000.0, 1.0),
-    "Urine_pH": (4.0, 9.0, 0.5), "Urine_Specific_Gravity": (1.000, 1.040, 0.001),
-    "Urine_Pus_Cells": (0.0, 200.0, 1.0), "Urine_RBC": (0.0, 200.0, 1.0),
-}
+    Returns:
+        Dictionary mapping canonical parameter keys to
+        ``{"value": float, "raw_match": str}``.
+    """
+    if not text:
+        return {}
 
-def _widget_bounds(key: str):
-    return _WIDGET_BOUNDS.get(key, (0.0, 999999.0, 0.1))
+    results: Dict[str, Dict[str, Any]] = {}
+    text_lower = text.lower()
+    matched_spans: List[Tuple[int, int]] = []  # track (start, end) of matched regions
 
+    def _overlaps(start: int, end: int) -> bool:
+        """Check whether (start, end) overlaps any already-matched span."""
+        for ms, me in matched_spans:
+            if start < me and end > ms:
+                return True
+        return False
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR
-# ─────────────────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("## ⚕️ Configuration")
+    for alias in _SORTED_ALIASES:
+        canonical = PARAMETER_ALIASES[alias]
+        if canonical in results:
+            continue  # already found via a longer/earlier alias
 
-    # API Key
-    with st.expander("🔑 Claude API Key", expanded=not bool(st.session_state.api_key)):
-        api_input = st.text_input(
-            "API Key", type="password",
-            value=st.session_state.api_key,
-            placeholder="sk-ant-...",
-            help="Required for AI Review tab",
-            key="api_key_input",
-        )
-        if api_input:
-            st.session_state.api_key = api_input
-        if st.session_state.api_key:
-            st.success("API Key configured ✓")
-
-    st.divider()
-
-    # Panel selector
-    st.markdown("### 🔬 Active Panels")
-    all_panel_opts = list(PANEL_LABELS.keys())
-    selected = st.multiselect(
-        "Select investigation panels",
-        options=all_panel_opts,
-        default=st.session_state.active_panels,
-        format_func=lambda p: f"{PANEL_ICONS.get(p, '🧪')} {PANEL_LABELS[p]}",
-        key="panel_selector",
-    )
-    if selected:
-        st.session_state.active_panels = selected
-
-    st.divider()
-
-    # Patient info
-    st.markdown("### 👤 Patient Info")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.session_state.sex = st.selectbox(
-            "Sex", ["male", "female"],
-            index=0 if st.session_state.sex == "male" else 1,
-        )
-    with col2:
-        st.session_state.age = st.number_input(
-            "Age", min_value=1, max_value=120, value=st.session_state.age,
+        # Build a pattern that looks for the alias followed by a number
+        escaped = re.escape(alias)
+        pattern = (
+            rf"(?:^|[\s,;:(])"     # word boundary / separator before
+            rf"{escaped}"
+            rf"[\s:=\-–]*"         # separator between name and value
+            rf"{_NUM_RE}"           # the numeric value
         )
 
-    # If patient info was extracted from OCR, show it
-    pi = st.session_state.patient_info
-    if pi:
-        st.markdown("**Extracted patient details:**")
-        for field, val in pi.items():
-            st.caption(f"**{field.title()}:** {val}")
+        match = re.search(pattern, text_lower)
+        if match:
+            if _overlaps(match.start(), match.end()):
+                continue  # this text region was already consumed
+            try:
+                value = float(match.group(1))
+                results[canonical] = {
+                    "value": value,
+                    "raw_match": match.group(0).strip(),
+                }
+                matched_spans.append((match.start(), match.end()))
+            except (ValueError, IndexError):
+                continue
 
-    st.divider()
-    st.caption("⚠️ Educational tool only. Not for clinical decisions.")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HEADER
-# ─────────────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div style="text-align:center; padding:1.5rem 0 .5rem;">
-  <h1 style="font-size:2.1rem; margin-bottom:.2rem;">
-    🔬 Comprehensive Lab Investigation Analysis
-  </h1>
-  <p style="color:#8b949e; font-size:.95rem;">
-    AI-Powered Multi-Panel Clinical Laboratory Analysis Platform
-  </p>
-  <p style="color:#6e7681; font-size:.82rem; letter-spacing:.08em;">
-    CBC &bull; LFT &bull; KFT &bull; Lipid Profile &bull; Diabetes &bull;
-    TFT &bull; Vit D &bull; Vit B12 &bull; Urine R/M &bull; Rheumatology &bull; Oncology
-  </p>
-</div>
-""", unsafe_allow_html=True)
+    return results
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TABS
-# ─────────────────────────────────────────────────────────────────────────────
-tab_upload, tab_manual, tab_analysis, tab_ai, tab_report = st.tabs([
-    "📤 Upload & Extract",
-    "✏️ Manual Entry",
-    "📊 Analysis",
-    "🤖 AI Review",
-    "📄 Report",
-])
+# ---------------------------------------------------------------------------
+# Patient info extraction
+# ---------------------------------------------------------------------------
 
+def extract_patient_info(text: str) -> Dict[str, str]:
+    """Extract patient demographic information from report text.
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — UPLOAD & EXTRACT
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_upload:
-    st.markdown("### 📤 Upload Lab Report")
-    st.caption("Upload a PDF or image of your lab report. Text is extracted via OCR and values are auto-populated.")
+    Looks for common fields: name, age, sex/gender, date, lab/hospital,
+    and patient/sample ID.
 
-    col_up, col_raw = st.columns([1, 1], gap="large")
+    Args:
+        text: Raw or preprocessed report text.
 
-    with col_up:
-        uploaded = st.file_uploader(
-            "Drop your lab report here",
-            type=["pdf", "png", "jpg", "jpeg"],
-            help="Supported: PDF, PNG, JPG",
-        )
+    Returns:
+        Dictionary with found patient info fields (may be empty).
+    """
+    info: Dict[str, str] = {}
+    if not text:
+        return info
 
-        if uploaded:
-            with st.spinner("🔍 Extracting text and parsing values…"):
-                try:
-                    result = process_uploaded_file(uploaded)
-                    # Handle both 4-tuple and 5-tuple returns
-                    if len(result) == 5:
-                        raw_text, params, grouped, panel_summary, patient_info = result
-                    else:
-                        raw_text, params, grouped, patient_info = result
-
-                    st.session_state.extracted_text = raw_text
-                    st.session_state.parsed_values  = {
-                        k: v["value"] if isinstance(v, dict) else v
-                        for k, v in params.items()
-                        if isinstance(v, dict) and isinstance(v.get("value"), (int, float))
-                           or isinstance(v, (int, float))
-                    }
-                    st.session_state.patient_info   = patient_info
-
-                    n_found = len(st.session_state.parsed_values)
-                    st.success(f"✅ Extracted {n_found} parameter{'s' if n_found != 1 else ''} successfully!")
-
-                    # Show parsed count per panel
-                    for panel_key in st.session_state.active_panels:
-                        panel_params = PANEL_PARAMETER_MAP.get(panel_key, [])
-                        found = [p for p in panel_params if p in st.session_state.parsed_values]
-                        if found:
-                            st.caption(
-                                f"{PANEL_ICONS.get(panel_key, '🧪')} **{PANEL_LABELS[panel_key]}:** "
-                                f"{len(found)} values found"
-                            )
-
-                except Exception as e:
-                    st.error(f"Extraction error: {e}")
-
-        # Manual text paste fallback
-        with st.expander("Or paste raw lab text"):
-            pasted = st.text_area(
-                "Paste lab report text here",
-                height=200,
-                placeholder="Haemoglobin: 13.2 g/dL\nWBC: 7.5 x10⁹/L\n...",
-            )
-            if st.button("Parse Text", key="parse_pasted"):
-                if pasted.strip():
-                    with st.spinner("Parsing…"):
-                        params = parse_parameters(preprocess_text(pasted))
-                        pi = extract_patient_info(pasted)
-                        st.session_state.extracted_text = pasted
-                        st.session_state.parsed_values  = {
-                            k: v["value"] if isinstance(v, dict) else v
-                            for k, v in params.items()
-                            if isinstance(v, dict) and isinstance(v.get("value"), (int, float))
-                               or isinstance(v, (int, float))
-                        }
-                        st.session_state.patient_info = pi
-                        st.success(f"✅ Parsed {len(st.session_state.parsed_values)} parameters.")
-
-    with col_raw:
-        if st.session_state.extracted_text:
-            st.markdown("**Extracted Text Preview**")
-            st.text_area(
-                label="",
-                value=st.session_state.extracted_text[:3000]
-                      + ("…[truncated]" if len(st.session_state.extracted_text) > 3000 else ""),
-                height=350,
-                disabled=True,
-                key="ocr_preview",
-            )
-        else:
-            st.markdown(
-                '<div class="lab-card" style="text-align:center; padding:3rem; color:#6e7681;">'
-                '📄<br><br>Upload a file to see extracted text here.'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — MANUAL ENTRY
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_manual:
-    st.markdown("### ✏️ Manual Parameter Entry")
-    st.caption("Enter values for any parameters not captured by OCR, or fill in manually.")
-
-    prefilled = st.session_state.parsed_values
-
-    # Panel sections
-    active = st.session_state.active_panels
-
-    # Show 2 panels per row
-    for row_start in range(0, len(active), 2):
-        row_panels = active[row_start:row_start + 2]
-        cols = st.columns(len(row_panels), gap="large")
-        for col, panel_key in zip(cols, row_panels):
-            with col:
-                icon = PANEL_ICONS.get(panel_key, "🧪")
-                st.markdown(f"#### {icon} {PANEL_LABELS[panel_key]}")
-
-                panel_params = PANEL_PARAMETER_MAP.get(panel_key, [])
-                for key in panel_params:
-                    ref  = REFERENCE_RANGES.get(key, {})
-                    unit = ref.get("unit", "")
-                    desc = ref.get("description", key.replace("_", " "))
-                    lo, hi, step = _widget_bounds(key)
-                    prefill_val = float(prefilled.get(key, 0.0) or 0.0)
-
-                    widget_label = f"{desc}" + (f" ({unit})" if unit else "")
-                    val = safe_number_input(
-                        widget_label,
-                        min_value=lo, max_value=hi,
-                        value=prefill_val, step=step,
-                        key=f"manual_{panel_key}_{key}",
-                        fmt="%.3f" if step < 0.01 else "%.2f" if step < 1.0 else "%.1f",
-                    )
-                    lo_thresh = lo + 1e-9
-                    if val > lo_thresh:
-                        st.session_state.manual_values[key] = val
-
-    st.divider()
-    if st.button("▶ Run Analysis with Manual Values", type="primary", use_container_width=True):
-        # Merge OCR + manual (manual takes priority)
-        merged = {**st.session_state.parsed_values, **st.session_state.manual_values}
-        with st.spinner("Analysing…"):
-            results = analyze_all(
-                merged,
-                sex=st.session_state.sex,
-                age=st.session_state.age,
-                active_panels=st.session_state.active_panels,
-            )
-            st.session_state.analysis_results = results
-        st.success("✅ Analysis complete! Switch to the Analysis tab.")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — ANALYSIS
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_analysis:
-    st.markdown("### 📊 Analysis Results")
-
-    # Auto-run if we have parsed values but no results yet
-    if st.session_state.parsed_values and not st.session_state.analysis_results:
-        merged = {**st.session_state.parsed_values, **st.session_state.manual_values}
-        st.session_state.analysis_results = analyze_all(
-            merged, sex=st.session_state.sex, age=st.session_state.age,
-            active_panels=st.session_state.active_panels,
-        )
-
-    if not st.session_state.analysis_results:
-        st.markdown(
-            '<div class="lab-card" style="text-align:center; padding:3rem; color:#6e7681;">'
-            '📊<br><br>Upload a report or enter values manually to see analysis here.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-        st.stop()
-
-    results = st.session_state.analysis_results
-    overall_sev = get_overall_severity(results)
-    overall_colour = _sev_colour(overall_sev)
-
-    # ── Overview metrics ──────────────────────────────────────────────────────
-    total_params = sum(len(r.get("results", {})) for r in results.values())
-    total_abnormal = sum(len(r.get("abnormal", [])) for r in results.values())
-    total_critical = sum(len(r.get("critical", [])) for r in results.values())
-
-    st.markdown(f"""
-    <div class="lab-card" style="border-left:4px solid {overall_colour};">
-      <div class="lab-card-header">
-        Overall Status &nbsp;
-        <span style="color:{overall_colour}; font-size:1rem;">
-          ● {SEVERITY_LABELS.get(overall_sev, 'Unknown')}
-        </span>
-      </div>
-      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; text-align:center;">
-        <div>
-          <div style="font-size:1.8rem; font-weight:700; color:var(--text)">{total_params}</div>
-          <div style="color:var(--text2); font-size:.8rem">Parameters</div>
-        </div>
-        <div>
-          <div style="font-size:1.8rem; font-weight:700; color:#3fb950">{total_params - total_abnormal}</div>
-          <div style="color:var(--text2); font-size:.8rem">Normal</div>
-        </div>
-        <div>
-          <div style="font-size:1.8rem; font-weight:700; color:#e3b341">{total_abnormal}</div>
-          <div style="color:var(--text2); font-size:.8rem">Abnormal</div>
-        </div>
-        <div>
-          <div style="font-size:1.8rem; font-weight:700; color:#f85149">{total_critical}</div>
-          <div style="color:var(--text2); font-size:.8rem">Critical</div>
-        </div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── Critical alerts ───────────────────────────────────────────────────────
-    all_critical = []
-    for panel_key, panel_result in results.items():
-        for pkey in panel_result.get("critical", []):
-            r = panel_result["results"][pkey]
-            all_critical.append((panel_key, pkey, r))
-
-    if all_critical:
-        st.markdown("#### ⚠️ Critical Values — Immediate Attention Required")
-        for panel_key, pkey, r in all_critical:
-            st.markdown(
-                f'<div class="alert-critical">🚨 <strong>{r["description"]}</strong> = '
-                f'{r["value"]:.2f} {r["unit"]} &nbsp;·&nbsp; {r["flag"]} &nbsp;·&nbsp; '
-                f'{PANEL_LABELS.get(panel_key, panel_key)}</div>',
-                unsafe_allow_html=True,
-            )
-
-    st.divider()
-
-    # ── Per-panel results ─────────────────────────────────────────────────────
-    for panel_key, panel_result in results.items():
-        if not panel_result.get("results"):
-            continue
-
-        panel_sev = panel_result.get("overall_severity", SEV_NORMAL)
-        panel_col = _sev_colour(panel_sev)
-        icon = PANEL_ICONS.get(panel_key, "🧪")
-        label = PANEL_LABELS.get(panel_key, panel_key)
-        n_ab  = len(panel_result.get("abnormal", []))
-        n_tot = len(panel_result.get("results", {}))
-
-        # Collapsible panel card
-        with st.expander(
-            f"{icon}  {label}   —   "
-            f"{n_ab}/{n_tot} abnormal",
-            expanded=(panel_sev >= SEV_MILD),
-        ):
-            # Header row
-            st.markdown(
-                f'<div style="color:{panel_col}; font-size:.85rem; margin-bottom:.75rem;">'
-                f'● {SEVERITY_LABELS.get(panel_sev, "Normal")}  &nbsp;|&nbsp;  '
-                f'{panel_result.get("summary","")}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-            # Column headers
-            st.markdown(
-                '<div class="param-row" style="border-bottom:1px solid var(--border); '
-                'color:var(--text3); font-size:.78rem; font-weight:600; margin-bottom:6px;">'
-                '<div>Parameter</div><div style="text-align:right">Value</div>'
-                '<div>Reference Range</div><div>Status</div>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
-            # Parameter rows
-            for pkey, r in panel_result["results"].items():
-                val_str = f"{r['value']:.2f}" if isinstance(r['value'], float) else str(r['value'])
-                lo = r.get("reference_min")
-                hi = r.get("reference_max")
-                ref_str = (
-                    f"{lo:.2f}–{hi:.2f}" if lo is not None and hi is not None
-                    else f"≥{lo:.2f}" if lo is not None
-                    else f"≤{hi:.2f}" if hi is not None
-                    else "—"
-                )
-                flag_cls = _flag_class(r["status"])
-                badge = _status_badge(r["status"])
-                row_bg = (
-                    "background:rgba(248,81,73,.06);" if "Critical" in r["status"]
-                    else "background:rgba(227,179,65,.04);" if r["status"] in ("High", "Low")
-                    else ""
-                )
-                st.markdown(
-                    f'<div class="param-row" style="{row_bg}">'
-                    f'<div class="param-name">{r["description"]}</div>'
-                    f'<div class="param-value">{val_str} <span style="color:var(--text3);font-size:.75rem">{r["unit"]}</span></div>'
-                    f'<div class="param-range">{ref_str} {r["unit"]}</div>'
-                    f'<div>{badge}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-                # Show interpretation for abnormals
-                if r["status"] != STATUS_NORMAL and r.get("interpretation"):
-                    st.caption(f"↳ {r['interpretation']}")
-
-            # Derived values
-            derived = panel_result.get("derived", {})
-            if derived:
-                st.markdown(
-                    '<div style="color:var(--text3); font-size:.78rem; '
-                    'margin-top:.75rem; margin-bottom:.3rem; font-weight:600;">'
-                    'CALCULATED VALUES</div>',
-                    unsafe_allow_html=True,
-                )
-                for dk, dv in derived.items():
-                    dval = dv.get("value", "")
-                    dunit = dv.get("unit", "")
-                    dref  = dv.get("reference", "")
-                    ddesc = dv.get("description", dk)
-                    dinterp = dv.get("interpretation", "")
-                    st.markdown(
-                        f'<div class="param-row">'
-                        f'<div class="param-name" style="color:var(--text2)">{ddesc}</div>'
-                        f'<div class="param-value">{dval:.3f} <span style="color:var(--text3);font-size:.75rem">{dunit}</span></div>'
-                        f'<div class="param-range">{dref}</div>'
-                        f'<div style="color:var(--text3); font-size:.8rem">{dinterp}</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-
-            # Recommendations
-            recs = panel_result.get("recommendations", [])
-            if recs and not (len(recs) == 1 and "No urgent" in recs[0]):
-                st.markdown("**Recommendations:**")
-                for rec in recs:
-                    sev_class = (
-                        "alert-critical" if "🚨" in rec
-                        else "alert-warn" if "⚠" in rec
-                        else "alert-ok"
-                    )
-                    st.markdown(
-                        f'<div class="{sev_class}" style="font-size:.85rem;">{rec}</div>',
-                        unsafe_allow_html=True,
-                    )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — AI REVIEW
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_ai:
-    st.markdown("### 🤖 AI Clinical Review")
-    st.caption(
-        "Claude analyses your lab results holistically and provides an educational summary. "
-        "**Not a substitute for medical advice.**"
+    # Name — bounded quantifiers prevent ReDoS; capture group requires
+    # a leading letter so it cannot overlap with preceding \s{0,3}.
+    # Use literal space [ ] in the capture group (not \s) to prevent
+    # matching across newlines — names should stay on one line.
+    name_match = re.search(
+        r"(?:patient\s{0,5}name|name)\s{0,3}[:=\-]\s{0,3}"
+        r"([A-Za-z][A-Za-z.]*(?:[ \-'][A-Za-z][A-Za-z.]*){0,5})",
+        text, re.IGNORECASE,
     )
+    if name_match:
+        info["name"] = name_match.group(1).strip()
 
-    if not ANTHROPIC_AVAILABLE:
-        st.warning("Install the `anthropic` package: `pip install anthropic`")
-    elif not st.session_state.api_key:
-        st.info("Add your Claude API key in the sidebar to enable AI review.")
-    elif not st.session_state.analysis_results:
-        st.info("Run analysis first (upload a report or enter values manually).")
+    # Age
+    age_match = re.search(
+        r"(?:age)\s{0,3}[:=\-]\s{0,3}(\d{1,3})\s*(?:y(?:ears?|rs?)?)?",
+        text, re.IGNORECASE,
+    )
+    if age_match:
+        info["age"] = age_match.group(1).strip()
+
+    # Sex / Gender
+    sex_match = re.search(
+        r"(?:sex|gender)\s{0,3}[:=\-]\s{0,3}(male|female|m|f)\b",
+        text, re.IGNORECASE,
+    )
+    if sex_match:
+        raw = sex_match.group(1).strip().lower()
+        info["sex"] = "male" if raw in ("m", "male") else "female"
+
+    # Date
+    date_match = re.search(
+        r"(?:date|collected|reported|sample date)\s{0,3}[:=\-]\s{0,3}"
+        r"(\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4})",
+        text, re.IGNORECASE,
+    )
+    if date_match:
+        info["date"] = date_match.group(1).strip()
+
+    # Lab / Hospital — use [^\n] instead of . to avoid matching across lines
+    lab_match = re.search(
+        r"(?:lab(?:oratory)?|hospital|clinic|centre|center)\s{0,3}[:=\-]\s{0,3}([^\n]{2,80})",
+        text, re.IGNORECASE,
+    )
+    if lab_match:
+        info["lab"] = lab_match.group(1).strip()
+
+    # Patient / Sample ID
+    id_match = re.search(
+        r"(?:patient\s{0,3}id|sample\s{0,3}id|mrn|uhid|reg(?:istration)?\.?\s{0,3}no)"
+        r"\s{0,3}[:=\-]\s{0,3}(\S+)",
+        text, re.IGNORECASE,
+    )
+    if id_match:
+        info["id"] = id_match.group(1).strip()
+
+    return info
+
+
+# ---------------------------------------------------------------------------
+# File processing (OCR / text extraction)
+# ---------------------------------------------------------------------------
+
+def _extract_text_from_pdf(file_bytes: bytes) -> str:
+    """Extract text from a PDF using available libraries.
+
+    Tries pdfplumber first, falls back to PyPDF2, then to pytesseract
+    via pdf2image for scanned PDFs.
+
+    Args:
+        file_bytes: Raw bytes of the PDF file.
+
+    Returns:
+        Extracted text string.
+    """
+    text = ""
+
+    # Strategy 1: pdfplumber (best for digital PDFs)
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        if text.strip():
+            return text
+    except Exception as exc:
+        logger.debug("pdfplumber failed: %s", exc)
+
+    # Strategy 2: PyPDF2
+    try:
+        from PyPDF2 import PdfReader
+        reader = PdfReader(io.BytesIO(file_bytes))
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        if text.strip():
+            return text
+    except Exception as exc:
+        logger.debug("PyPDF2 failed: %s", exc)
+
+    # Strategy 3: OCR via pdf2image + pytesseract (for scanned PDFs)
+    try:
+        from pdf2image import convert_from_bytes
+        import pytesseract
+        images = convert_from_bytes(file_bytes)
+        for img in images:
+            page_text = pytesseract.image_to_string(img)
+            if page_text:
+                text += page_text + "\n"
+    except Exception as exc:
+        logger.debug("pdf2image/pytesseract OCR failed: %s", exc)
+
+    return text
+
+
+def _extract_text_from_image(file_bytes: bytes) -> str:
+    """Extract text from an image file using pytesseract OCR.
+
+    Args:
+        file_bytes: Raw bytes of the image file.
+
+    Returns:
+        Extracted text string.
+    """
+    try:
+        from PIL import Image
+        import pytesseract
+        img = Image.open(io.BytesIO(file_bytes))
+        return pytesseract.image_to_string(img)
+    except Exception as exc:
+        logger.warning("Image OCR failed: %s", exc)
+        return ""
+
+
+def process_uploaded_file(
+    uploaded_file,
+) -> Tuple[str, Dict[str, Dict[str, Any]], Dict[str, list], Dict[str, str]]:
+    """Process an uploaded lab report file end-to-end.
+
+    Reads the file, extracts text (via OCR or text extraction), preprocesses
+    it, parses parameter values, and extracts patient information.
+
+    Args:
+        uploaded_file: A file-like object (e.g. Streamlit ``UploadedFile``)
+            with ``.name`` and ``.read()`` attributes.
+
+    Returns:
+        A 4-tuple of:
+            - raw_text (str): The raw extracted text.
+            - params (dict): Parsed parameters keyed by canonical name.
+            - grouped (dict): Parameters grouped by panel (for convenience).
+            - patient_info (dict): Extracted patient demographics.
+
+    Raises:
+        ValueError: If the file type is unsupported.
+    """
+    filename = getattr(uploaded_file, "name", "unknown")
+    file_bytes = uploaded_file.read()
+
+    # Reset the stream position so the caller can re-read if needed
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if ext == "pdf":
+        raw_text = _extract_text_from_pdf(file_bytes)
+    elif ext in ("png", "jpg", "jpeg", "tiff", "bmp"):
+        raw_text = _extract_text_from_image(file_bytes)
     else:
-        col_opt, col_go = st.columns([3, 1])
-        with col_opt:
-            review_focus = st.multiselect(
-                "Focus areas for AI review",
-                options=st.session_state.active_panels,
-                default=st.session_state.active_panels,
-                format_func=lambda p: f"{PANEL_ICONS.get(p,'🧪')} {PANEL_LABELS[p]}",
-            )
-            clinical_context = st.text_area(
-                "Clinical context (symptoms, medications, history)",
-                placeholder="e.g. Type 2 DM on metformin, fatigue, family history of IHD…",
-                height=80,
-            )
-        with col_go:
-            st.markdown("<br>", unsafe_allow_html=True)
-            run_ai = st.button("🤖 Generate AI Review", type="primary", use_container_width=True)
+        raise ValueError(f"Unsupported file type: .{ext}")
 
-        if run_ai:
-            results = st.session_state.analysis_results
+    processed_text = preprocess_text(raw_text)
+    params = parse_parameters(processed_text)
+    patient_info = extract_patient_info(raw_text)  # use raw for names/dates
 
-            # Build compact summary for prompt
-            def _fmt_results_for_prompt(results, focus):
-                lines = []
-                for panel_key in focus:
-                    pr = results.get(panel_key, {})
-                    if not pr.get("results"):
-                        continue
-                    lines.append(f"\n### {PANEL_LABELS.get(panel_key, panel_key)}")
-                    lines.append(f"Summary: {pr.get('summary','')}")
-                    for pkey, r in pr["results"].items():
-                        flag = "" if r["status"] == "Normal" else f" [{r['flag']}]"
-                        lines.append(
-                            f"- {r['description']}: {r['value']} {r['unit']}{flag}"
-                        )
-                    for dk, dv in pr.get("derived", {}).items():
-                        lines.append(f"  (calc) {dv.get('description',dk)}: {dv.get('value',''):.2f} {dv.get('unit','')}")
-                return "\n".join(lines)
+    # Group parameters by panel (import lazily to avoid circular deps)
+    try:
+        from utils.analysis_engine import PANEL_PARAMETER_MAP
+    except ImportError:
+        from analysis_engine import PANEL_PARAMETER_MAP
 
-            pi = st.session_state.patient_info
-            age_sex = f"Age {st.session_state.age}, {st.session_state.sex}"
-            if pi.get("name"):
-                age_sex = f"Patient: {pi['name']}, {age_sex}"
+    grouped: Dict[str, list] = {}
+    for panel_key, panel_params in PANEL_PARAMETER_MAP.items():
+        found = [p for p in panel_params if p in params]
+        if found:
+            grouped[panel_key] = found
 
-            lab_text = _fmt_results_for_prompt(results, review_focus)
-            context_block = f"Clinical context: {clinical_context}" if clinical_context.strip() else ""
-
-            prompt = f"""You are a clinical pathologist reviewing laboratory results for educational purposes.
-
-Patient demographics: {age_sex}
-{context_block}
-
-LAB RESULTS:
-{lab_text}
-
-Please provide:
-1. **Overall Clinical Impression** — 2-3 sentences summarising the key findings.
-2. **Key Abnormalities** — Discuss each significant abnormal finding, its likely clinical significance, and differential diagnoses.
-3. **Patterns & Correlations** — Identify any clinically relevant patterns across panels (e.g., anaemia + iron deficiency; CKD + hyperphosphataemia).
-4. **Suggested Follow-up Investigations** — What additional tests would help clarify the picture.
-5. **Clinical Recommendations** — Prioritised, actionable points (educational only).
-
-Be concise but thorough. Use clear medical terminology. Always note that this is for educational purposes only and not a substitute for clinical evaluation."""
-
-            with st.spinner("🤖 Claude is analysing your results…"):
-                try:
-                    client = anthropic.Anthropic(api_key=st.session_state.api_key)
-                    response = client.messages.create(
-                        model="claude-opus-4-5",
-                        max_tokens=2000,
-                        messages=[{"role": "user", "content": prompt}],
-                    )
-                    ai_text = response.content[0].text
-                    st.session_state.ai_review = ai_text
-                except Exception as e:
-                    st.error(f"API error: {e}")
-                    st.session_state.ai_review = ""
-
-        if st.session_state.ai_review:
-            st.markdown(
-                '<div class="lab-card" style="border-left:4px solid var(--accent2);">',
-                unsafe_allow_html=True,
-            )
-            st.markdown(st.session_state.ai_review)
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.caption("⚠️ AI-generated educational content. Not a clinical diagnosis.")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 5 — REPORT
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_report:
-    st.markdown("### 📄 Generate Report")
-
-    if not st.session_state.analysis_results:
-        st.info("Run analysis first to generate a report.")
-    else:
-        pi    = st.session_state.patient_info
-        today = datetime.date.today().strftime("%d %B %Y")
-        results = st.session_state.analysis_results
-
-        col_meta, col_action = st.columns([2, 1])
-        with col_meta:
-            report_title = st.text_input("Report Title", value="Comprehensive Lab Investigation Report")
-            report_footer = st.text_input("Footer Note", value="Educational tool only — not for clinical use.")
-        with col_action:
-            st.markdown("<br>", unsafe_allow_html=True)
-            gen_report = st.button("📄 Render Report", type="primary", use_container_width=True)
-
-        if gen_report:
-            # Build HTML report
-            overall_sev  = get_overall_severity(results)
-            overall_col  = _sev_colour(overall_sev)
-            overall_label = SEVERITY_LABELS.get(overall_sev, "")
-            total_params  = sum(len(r.get("results", {})) for r in results.values())
-            total_ab      = sum(len(r.get("abnormal", [])) for r in results.values())
-            total_crit    = sum(len(r.get("critical", [])) for r in results.values())
-
-            patient_html = ""
-            for field, val in pi.items():
-                patient_html += f"<span><strong>{field.title()}:</strong> {val}</span> &nbsp;&nbsp; "
-
-            def _status_col(status):
-                return {"Normal": "#3fb950", "Low": "#79c0ff", "High": "#e3b341",
-                        "Critically Low": "#f85149", "Critically High": "#f85149"}.get(status, "#8b949e")
-
-            panel_sections = ""
-            for panel_key, pr in results.items():
-                if not pr.get("results"):
-                    continue
-                icon  = PANEL_ICONS.get(panel_key, "🧪")
-                label = PANEL_LABELS.get(panel_key, panel_key)
-                p_sev = pr.get("overall_severity", 0)
-                p_col = _sev_colour(p_sev)
-                rows = ""
-                for pkey, r in pr["results"].items():
-                    stat_col = _status_col(r["status"])
-                    lo = r.get("reference_min")
-                    hi = r.get("reference_max")
-                    ref_str = (
-                        f"{lo:.2f}–{hi:.2f}" if lo is not None and hi is not None
-                        else "—"
-                    )
-                    bg = "#2a0f0f" if "Critical" in r["status"] else "#2a2200" if r["status"] in ("High","Low") else "transparent"
-                    rows += f"""
-                    <tr style="background:{bg}">
-                      <td>{r['description']}</td>
-                      <td style="text-align:right;font-weight:600">{r['value']:.2f}</td>
-                      <td>{r['unit']}</td>
-                      <td>{ref_str} {r['unit']}</td>
-                      <td style="color:{stat_col};font-weight:600">{r['flag']}</td>
-                    </tr>"""
-                for dk, dv in pr.get("derived", {}).items():
-                    rows += f"""
-                    <tr style="color:#6e7681">
-                      <td><em>{dv.get('description',dk)} (calc)</em></td>
-                      <td style="text-align:right">{dv.get('value',0):.3f}</td>
-                      <td>{dv.get('unit','')}</td>
-                      <td>{dv.get('reference','')}</td>
-                      <td>—</td>
-                    </tr>"""
-
-                recs_html = ""
-                for rec in pr.get("recommendations", []):
-                    c = "#f85149" if "🚨" in rec else "#e3b341" if "⚠" in rec else "#3fb950"
-                    recs_html += f'<li style="color:{c}; margin:.2rem 0">{rec}</li>'
-
-                panel_sections += f"""
-                <div style="margin-bottom:2rem">
-                  <h3 style="color:{p_col};border-bottom:1px solid #30363d;padding-bottom:.4rem">
-                    {icon} {label}
-                    <span style="font-size:.8rem;color:{p_col}"> ● {SEVERITY_LABELS.get(p_sev,'')}</span>
-                  </h3>
-                  <table style="width:100%;border-collapse:collapse;font-size:.88rem">
-                    <thead><tr style="background:#1c2330;color:#8b949e;font-size:.78rem">
-                      <th style="text-align:left;padding:.4rem">Parameter</th>
-                      <th style="text-align:right;padding:.4rem">Value</th>
-                      <th style="padding:.4rem">Unit</th>
-                      <th style="padding:.4rem">Reference</th>
-                      <th style="padding:.4rem">Status</th>
-                    </tr></thead>
-                    <tbody>{rows}</tbody>
-                  </table>
-                  {"<ul style='margin-top:.75rem;padding-left:1.2rem'>" + recs_html + "</ul>" if recs_html else ""}
-                </div>"""
-
-            ai_section = ""
-            if st.session_state.ai_review:
-                ai_section = f"""
-                <div style="margin-top:2rem;padding:1rem;background:#0d2238;border-radius:8px;border:1px solid #1f6feb">
-                  <h3 style="color:#79c0ff">🤖 AI Clinical Review</h3>
-                  <div style="font-size:.88rem;color:#e6edf3;white-space:pre-wrap">{st.session_state.ai_review}</div>
-                  <p style="color:#6e7681;font-size:.78rem;margin-top:.75rem"><em>AI-generated educational content. Not a clinical diagnosis.</em></p>
-                </div>"""
-
-            html_report = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>{report_title}</title>
-<style>
-  body{{font-family:'Segoe UI',Arial,sans-serif;background:#0d1117;color:#e6edf3;padding:2rem;max-width:960px;margin:0 auto}}
-  h1,h2,h3{{font-family:Georgia,serif}}
-  table{{width:100%;border-collapse:collapse;margin:.5rem 0}}
-  th,td{{padding:.35rem .5rem;border-bottom:1px solid #30363d}}
-  @media print{{body{{background:white;color:black}}}}
-</style>
-</head>
-<body>
-<div style="text-align:center;padding:1.5rem 0;border-bottom:2px solid {overall_col};margin-bottom:1.5rem">
-  <h1>🔬 {report_title}</h1>
-  <p style="color:#8b949e">Generated: {today}</p>
-  <div style="margin:.5rem 0">{patient_html}</div>
-  <div style="margin-top:.75rem">
-    <span style="color:{overall_col};font-size:1.1rem;font-weight:600">
-      Overall: {overall_label}
-    </span> &nbsp;·&nbsp;
-    <span>{total_params} parameters &nbsp;·&nbsp; {total_ab} abnormal &nbsp;·&nbsp; {total_crit} critical</span>
-  </div>
-</div>
-{panel_sections}
-{ai_section}
-<p style="color:#6e7681;font-size:.78rem;border-top:1px solid #30363d;padding-top:1rem;margin-top:2rem;text-align:center">
-  {report_footer}
-</p>
-</body>
-</html>"""
-
-            st.download_button(
-                label="⬇️ Download HTML Report",
-                data=html_report.encode("utf-8"),
-                file_name=f"lab_report_{datetime.date.today().isoformat()}.html",
-                mime="text/html",
-                use_container_width=True,
-            )
-
-            # Also render inline
-            with st.expander("👁️ Preview Report", expanded=True):
-                st.components.v1.html(html_report, height=900, scrolling=True)
-
-        # JSON export
-        with st.expander("📦 Export raw analysis JSON"):
-            export = {
-                "generated": today,
-                "patient": st.session_state.patient_info,
-                "parameters": {
-                    k: v for k, v in {
-                        **st.session_state.parsed_values,
-                        **st.session_state.manual_values,
-                    }.items()
-                },
-                "panels": {
-                    pk: {
-                        "summary": pr.get("summary", ""),
-                        "overall_severity": pr.get("overall_severity", 0),
-                        "abnormal": pr.get("abnormal", []),
-                        "critical": pr.get("critical", []),
-                    }
-                    for pk, pr in st.session_state.analysis_results.items()
-                },
-                "ai_review": st.session_state.ai_review,
-            }
-            st.download_button(
-                label="⬇️ Download JSON",
-                data=json.dumps(export, indent=2, default=str).encode("utf-8"),
-                file_name=f"lab_analysis_{datetime.date.today().isoformat()}.json",
-                mime="application/json",
-            )
+    return raw_text, params, grouped, patient_info
