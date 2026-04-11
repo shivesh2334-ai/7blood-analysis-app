@@ -351,7 +351,8 @@ def extract_patient_info(text: str) -> Dict[str, str]:
 
     # Name — bounded quantifiers prevent ReDoS; capture group requires
     # a leading letter so it cannot overlap with preceding \s{0,3}.
-    # Use [ ] (literal space) instead of \s to avoid matching across lines.
+    # Use literal space [ ] in the capture group (not \s) to prevent
+    # matching across newlines — names should stay on one line.
     name_match = re.search(
         r"(?:patient\s{0,5}name|name)\s{0,3}[:=\-]\s{0,3}"
         r"([A-Za-z][A-Za-z.]*(?:[ \-'][A-Za-z][A-Za-z.]*){0,5})",
@@ -388,7 +389,7 @@ def extract_patient_info(text: str) -> Dict[str, str]:
 
     # Lab / Hospital — use [^\n] instead of . to avoid matching across lines
     lab_match = re.search(
-        r"(?:lab(?:oratory)?|hospital|clinic|centre|center)\s{0,3}[:=\-]\s{0,3}([^\n]{2,50})",
+        r"(?:lab(?:oratory)?|hospital|clinic|centre|center)\s{0,3}[:=\-]\s{0,3}([^\n]{2,80})",
         text, re.IGNORECASE,
     )
     if lab_match:
