@@ -349,9 +349,12 @@ def extract_patient_info(text: str) -> Dict[str, str]:
     if not text:
         return info
 
-    # Name — use non-overlapping pattern to prevent ReDoS
+    # Name — bounded quantifiers prevent ReDoS; capture group requires
+    # a leading letter so it cannot overlap with preceding \s{0,3}.
+    # Use [ ] (literal space) instead of \s to avoid matching across lines.
     name_match = re.search(
-        r"(?:patient\s*(?:name)?|name)\s*[:=\-]\s*([A-Za-z][A-Za-z.]*(?:[\s\-'][A-Za-z][A-Za-z.]*){0,5})",
+        r"(?:patient\s{0,5}name|name)\s{0,3}[:=\-]\s{0,3}"
+        r"([A-Za-z][A-Za-z.]*(?:[ \-'][A-Za-z][A-Za-z.]*){0,5})",
         text, re.IGNORECASE,
     )
     if name_match:
@@ -359,7 +362,7 @@ def extract_patient_info(text: str) -> Dict[str, str]:
 
     # Age
     age_match = re.search(
-        r"(?:age)\s*[:=\-]\s*(\d{1,3})\s*(?:y(?:ears?|rs?)?)?",
+        r"(?:age)\s{0,3}[:=\-]\s{0,3}(\d{1,3})\s*(?:y(?:ears?|rs?)?)?",
         text, re.IGNORECASE,
     )
     if age_match:
@@ -367,7 +370,7 @@ def extract_patient_info(text: str) -> Dict[str, str]:
 
     # Sex / Gender
     sex_match = re.search(
-        r"(?:sex|gender)\s*[:=\-]\s*(male|female|m|f)\b",
+        r"(?:sex|gender)\s{0,3}[:=\-]\s{0,3}(male|female|m|f)\b",
         text, re.IGNORECASE,
     )
     if sex_match:
@@ -376,24 +379,25 @@ def extract_patient_info(text: str) -> Dict[str, str]:
 
     # Date
     date_match = re.search(
-        r"(?:date|collected|reported|sample date)\s*[:=\-]\s*"
+        r"(?:date|collected|reported|sample date)\s{0,3}[:=\-]\s{0,3}"
         r"(\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4})",
         text, re.IGNORECASE,
     )
     if date_match:
         info["date"] = date_match.group(1).strip()
 
-    # Lab / Hospital
+    # Lab / Hospital — use [^\n] instead of . to avoid matching across lines
     lab_match = re.search(
-        r"(?:lab(?:oratory)?|hospital|clinic|centre|center)\s*[:=\-]\s*(.{2,50})",
+        r"(?:lab(?:oratory)?|hospital|clinic|centre|center)\s{0,3}[:=\-]\s{0,3}([^\n]{2,50})",
         text, re.IGNORECASE,
     )
     if lab_match:
-        info["lab"] = lab_match.group(1).strip().split("\n")[0]
+        info["lab"] = lab_match.group(1).strip()
 
     # Patient / Sample ID
     id_match = re.search(
-        r"(?:patient\s*id|sample\s*id|mrn|uhid|reg(?:istration)?\.?\s*no)\s*[:=\-]\s*(\S+)",
+        r"(?:patient\s{0,3}id|sample\s{0,3}id|mrn|uhid|reg(?:istration)?\.?\s{0,3}no)"
+        r"\s{0,3}[:=\-]\s{0,3}(\S+)",
         text, re.IGNORECASE,
     )
     if id_match:
